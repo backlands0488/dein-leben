@@ -1,5 +1,5 @@
 /* Dein Leben – Offline-Cache. Bei jeder neuen Version VERSION erhöhen. */
-const VERSION = 'dein-leben-v1.0.0';
+const VERSION = 'dein-leben-v1.0.1';
 const FILES = ['./', 'index.html', 'styles.css', 'core.js', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));

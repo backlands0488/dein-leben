@@ -123,7 +123,8 @@
       goal = `<div class="card"><div class="muted small">30-Tage-Durchschnitt</div><div class="big num">${C.fmt(ws.avg)} kg</div>
         <p class="muted" style="margin:8px 0 0">${ws.avg !== null && ws.avg > h.goal.kg ? `Noch ${C.fmt(ws.avg - h.goal.kg)} kg bis ${C.fmt(h.goal.kg)} kg. ` : ''}Stichtag ${dNum(h.goal.deadline)}, noch ${Math.max(0, C.diffDays(d, h.goal.deadline))} Tage.</p></div>`;
     }
-    const kind = h.link === 'sport' ? 'Wird automatisch durch Trainings und Bewegung ab 60 Min. abgehakt.' : (h.type === 'weekly' ? `${h.target}× pro Woche` : (h.kind === 'verzicht' ? 'Täglich bestätigen (Verzicht)' : 'Täglich'));
+    const tNow = C.targetAt(h, C.weekStart(d));
+    const kind = h.link === 'sport' ? `${tNow}× pro Woche. Wird automatisch durch Trainings und Bewegung ab 60 Min. abgehakt.` : (h.type === 'weekly' ? `${tNow}× pro Woche.` : (h.kind === 'verzicht' ? 'Täglich bestätigen (Verzicht)' : 'Täglich'));
     const q = (lbl, v, w) => `<div class="stat"><b class="num">${v}</b><span>${lbl}</span>${w ? `<span class="faint"> · ${w}</span>` : ''}</div>`;
     const wk = h.type === 'weekly' ? `${st.week.n}/${st.week.t}` : pct(st.week);
     const mo = st.month ? `${pct(st.month)}` : '–', yr = st.year ? pct(st.year) : '–';
@@ -170,6 +171,12 @@
       <span class="faint small">${[...st.days].filter(d => d.startsWith(y)).length} Tage in ${y}</span>
       <button class="btn sm ghost" data-act="year" data-arg="${h.id}:${ny}" ${ny > today().slice(0, 4) ? 'disabled' : ''}>${ny}</button></div>`;
   }
+  function targetFields(h) {
+    const cur = h ? C.targetAt(h, C.weekStart(today())) : 3;
+    return `<div class="fields"><label class="f"><span>Mal pro Woche</span><input type="text" inputmode="numeric" id="hTarget" value="${cur || 3}"></label>
+      ${h && h.type === 'weekly' ? `<label class="f"><span>Änderung gilt</span><select id="hTargetFrom"><option value="now">ab dieser Woche</option><option value="all">rückwirkend für alle Wochen</option></select></label>` : ''}</div>
+      ${h && h.type === 'weekly' ? '<p class="faint small" style="margin-top:-6px">„Ab dieser Woche“ lässt deine bisherigen Serien und Quoten unverändert.</p>' : '<p class="faint small" style="margin-top:-6px">Nur relevant bei „X-mal pro Woche“.</p>'}`;
+  }
   function screenHabitEdit({ id }) {
     const h = id ? S.habits.find(x => x.id === id) : null;
     const v = h || { name: '', emoji: '✓', color: COLORS[3], type: 'daily', target: 3, start: today() };
@@ -178,9 +185,13 @@
       <label class="f"><span>Name</span><input type="text" id="hName" value="${esc(v.name)}" placeholder="Ich lese heute 10 Seiten"></label>
       <div class="fields"><label class="f"><span>Symbol (Emoji)</span><input type="text" id="hEmoji" value="${esc(v.emoji)}"></label>
       <label class="f"><span>Beginn</span><input type="date" id="hStart" value="${v.start}"></label></div>
-      ${h && h.link ? `<p class="faint small">Diese Gewohnheit ist mit ${h.link === 'sport' ? 'deinen Trainings' : 'deinem Gewicht'} verknüpft. Art und Ziel bleiben fest.</p>` : `
-      <div class="fields"><label class="f"><span>Art</span><select id="hType"><option value="daily" ${v.type === 'daily' ? 'selected' : ''}>Täglich</option><option value="verzicht" ${v.kind === 'verzicht' ? 'selected' : ''}>Täglich (Verzicht)</option><option value="weekly" ${v.type === 'weekly' ? 'selected' : ''}>X-mal pro Woche</option></select></label>
-      <label class="f"><span>Mal pro Woche</span><input type="text" inputmode="numeric" id="hTarget" value="${v.target || 3}"></label></div>`}
+      ${h && h.link === 'sport' ? `<p class="faint small">Wird automatisch durch deine Trainings abgehakt. Die Art bleibt deshalb „X-mal pro Woche“.</p>${targetFields(h)}` : ''}
+      ${h && h.link === 'weightgoal' ? `<p class="faint small">Verknüpft mit deinem Gewicht: Ist der 30-Tage-Durchschnitt am Ziel oder der Stichtag vorbei, wird die Gewohnheit archiviert. Den Namen passt du bei Bedarf oben selbst an.</p>
+      <div class="fields"><label class="f"><span>Zielgewicht (kg)</span><input type="text" inputmode="decimal" id="hGoalKg" value="${C.fmt(h.goal.kg)}"></label>
+      <label class="f"><span>Stichtag</span><input type="date" id="hGoalDate" value="${h.goal.deadline}"></label></div>` : ''}
+      ${h && h.link ? '' : `
+      <div class="fields"><label class="f"><span>Art</span><select id="hType"><option value="daily" ${v.type === 'daily' && v.kind !== 'verzicht' ? 'selected' : ''}>Täglich</option><option value="verzicht" ${v.kind === 'verzicht' ? 'selected' : ''}>Täglich (Verzicht)</option><option value="weekly" ${v.type === 'weekly' ? 'selected' : ''}>X-mal pro Woche</option></select></label></div>
+      ${targetFields(h)}`}
       <label class="f"><span>Farbe</span><div class="swatches">${COLORS.map(c => `<button class="swatch" style="background:${c}" aria-pressed="${c === ui.draftColor}" data-act="color" data-arg="${c}" aria-label="Farbe ${c}"></button>`).join('')}</div></label>
       <button class="btn primary block" data-act="saveHabit" data-arg="${h ? h.id : ''}">Speichern</button>
       ${h ? `<div style="height:10px"></div><button class="btn ghost block" data-act="archiveHabit" data-arg="${h.id}">${h.archived ? 'Wieder aktivieren' : 'Archivieren'}</button>
@@ -366,7 +377,7 @@
       <h2>Einstellungen</h2>
       <label class="f"><span>Körpergröße in cm (für die Navy-Methode)</span><input type="text" inputmode="decimal" value="${S.settings.heightCm || ''}" data-change="height"></label>
       <p class="faint small" id="persist">Speicherstatus wird geprüft …</p>
-      <p class="faint small">Dein Leben, Version 1</p>`;
+      <p class="faint small">Dein Leben, Version 1.0.1</p>`;
   }
   function screenHabits() {
     const row = h => `<button class="pick" data-act="open" data-arg="habit:${h.id}"><span>${esc(h.emoji)} ${esc(h.name)}</span><span class="faint small">${h.archived ? 'archiviert' : ''} ›</span></button>`;
@@ -447,9 +458,23 @@
       h.name = name; h.emoji = document.getElementById('hEmoji').value.trim() || '✓';
       h.start = document.getElementById('hStart').value || today(); h.color = ui.draftColor || h.color || COLORS[3];
       const t = document.getElementById('hType');
-      if (t) { const v = t.value; h.type = v === 'weekly' ? 'weekly' : 'daily'; h.kind = v === 'verzicht' ? 'verzicht' : undefined;
-        h.target = h.type === 'weekly' ? Math.max(1, Math.min(7, Number(document.getElementById('hTarget').value) || 3)) : 1; }
+      const tIn = document.getElementById('hTarget');
+      const newT = tIn ? Math.max(1, Math.min(7, Math.round(C.num(tIn.value) || 3))) : null;
+      const wasWeekly = h.type === 'weekly';
+      if (t) { const v = t.value; h.type = v === 'weekly' ? 'weekly' : 'daily'; h.kind = v === 'verzicht' ? 'verzicht' : undefined; }
+      if (h.type === 'weekly' && newT) {
+        const ws = C.weekStart(today()), from = document.getElementById('hTargetFrom');
+        if (!a || !wasWeekly || (from && from.value === 'all')) { h.target = newT; h.targets = []; }
+        else if (C.targetAt(h, ws) !== newT) { h.targets = (h.targets || []).filter(x => x.from < ws); h.targets.push({ from: ws, target: newT }); }
+      } else if (h.type !== 'weekly') { h.target = 1; h.targets = []; }
+      if (h.link === 'weightgoal') {
+        const kg = C.num(document.getElementById('hGoalKg').value), dl = document.getElementById('hGoalDate').value;
+        if (!kg || kg < 30 || kg > 300) return toast('Prüfe das Zielgewicht.');
+        if (!dl) return toast('Gib einen Stichtag an.');
+        h.goal = { kg, deadline: dl };
+      }
       if (!a) S.habits.push(h);
+      for (const n of C.checkGoals(S)) S.notices.push(n);
       save(); pop(); toast('Gespeichert');
     },
     archiveHabit: a => { const h = S.habits.find(x => x.id === a); h.archived = !h.archived; h.archivedOn = h.archived ? today() : undefined; save(); pop(); },
@@ -569,5 +594,9 @@
   // Start
   if (S) { const n = C.checkGoals(S); if (n.length) { S.notices.push(...n); save(); } }
   render();
-  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) location.reload(); });
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
 })();

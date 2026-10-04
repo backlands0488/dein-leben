@@ -144,14 +144,19 @@
     return { cur, best };
   }
   function weekCount(days, ws) { let n = 0; for (let i = 0; i < 7; i++) if (days.has(addDays(ws, i))) n++; return n; }
-  function streaksWeekly(days, start, today, target) {
+  // Wochenziel kann sich ändern: gilt jeweils ab einer bestimmten Woche
+  function targetAt(h, ws) {
+    const list = (h.targets || []).filter(x => x.from <= ws).sort((a, b) => a.from.localeCompare(b.from));
+    return list.length ? list[list.length - 1].target : h.target;
+  }
+  function streaksWeekly(days, start, today, tgt) {
     const w0 = weekStart(start), wNow = weekStart(today);
     let best = 0, run = 0;
     for (let w = w0; w <= wNow; w = addDays(w, 7)) {
-      if (weekCount(days, w) >= target) { run++; best = Math.max(best, run); } else if (w !== wNow) run = 0;
+      if (weekCount(days, w) >= tgt(w)) { run++; best = Math.max(best, run); } else if (w !== wNow) run = 0;
     }
-    let cur = 0; let w = weekCount(days, wNow) >= target ? wNow : addDays(wNow, -7);
-    while (w >= w0 && weekCount(days, w) >= target) { cur++; w = addDays(w, -7); }
+    let cur = 0; let w = weekCount(days, wNow) >= tgt(wNow) ? wNow : addDays(wNow, -7);
+    while (w >= w0 && weekCount(days, w) >= tgt(w)) { cur++; w = addDays(w, -7); }
     return { cur, best };
   }
   function quotaDaily(days, start, a, b, today) {
@@ -160,12 +165,12 @@
     let n = 0, t = 0; for (const d of dayRange(from, to)) { t++; if (days.has(d)) n++; }
     return { n, t, pct: n / t };
   }
-  function quotaWeekly(days, start, a, b, today, target) {
+  function quotaWeekly(days, start, a, b, today, tgt) {
     // Wochen, die im Zeitraum beginnen; laufende Woche zählt nur, wenn schon erreicht
     let n = 0, t = 0; const wNow = weekStart(today);
     for (let w = weekStart(a < start ? start : a); w <= b && w <= wNow; w = addDays(w, 7)) {
       if (w < a) continue;
-      const ok = weekCount(days, w) >= target;
+      const ok = weekCount(days, w) >= tgt(w);
       if (w === wNow && !ok) continue;
       t++; if (ok) n++;
     }
@@ -176,12 +181,13 @@
     const end = h.archived && h.archivedOn && h.archivedOn < today ? h.archivedOn : today;
     const total = [...days].filter(d => d <= end).length;
     if (h.type === 'weekly') {
-      const st = streaksWeekly(days, h.start, end, h.target);
+      const tgt = w => targetAt(h, w);
+      const st = streaksWeekly(days, h.start, end, tgt);
       return {
         days, total, unit: 'Wochen', ...st,
-        week: { n: weekCount(days, weekStart(end)), t: h.target },
-        month: quotaWeekly(days, h.start, monthStart(end), monthEnd(end), end, h.target),
-        year: quotaWeekly(days, h.start, yearStart(end), yearEnd(end), end, h.target)
+        week: { n: weekCount(days, weekStart(end)), t: tgt(weekStart(end)) },
+        month: quotaWeekly(days, h.start, monthStart(end), monthEnd(end), end, tgt),
+        year: quotaWeekly(days, h.start, yearStart(end), yearEnd(end), end, tgt)
       };
     }
     const st = streaksDaily(days, h.start, end);
@@ -251,7 +257,7 @@
   const api = {
     pad, iso, parseDay, addDays, diffDays, weekStart, monthStart, monthEnd, yearStart, quarterStart, todayStr, nowLocal, dayRange,
     num, fmt, fmtW, emptyState, validate, PHASES, T, dailyFirst, avg30, weightStatus, thresholds, navyFat, measurementDue,
-    checkedDays, habitStats, checkGoals, weekCount, TYPES, CATS, exById, nextNum, trainings, lastItem, pauseFor, setSummary
+    checkedDays, habitStats, targetAt, checkGoals, weekCount, TYPES, CATS, exById, nextNum, trainings, lastItem, pauseFor, setSummary
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
 })(typeof self !== 'undefined' ? self : this);
