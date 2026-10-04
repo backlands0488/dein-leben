@@ -1,0 +1,17 @@
+{
+  "name": "Dein Leben",
+  "short_name": "Dein Leben",
+  "description": "Gewohnheiten, Gewicht und Training – offline auf dem Handy",
+  "lang": "de",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#141316",
+  "theme_color": "#141316",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
