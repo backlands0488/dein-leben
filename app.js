@@ -65,7 +65,7 @@
   }
   function tabbar() {
     const b = (id, ic, l) => `<button data-act="tab" data-arg="${id}" ${ui.tab === id ? 'aria-current="page"' : ''}><span class="ic">${ic}</span>${l}</button>`;
-    return `<nav class="tabs">${b('heute', '◎', 'Heute')}${b('training', '▤', 'Training')}${b('gewicht', '◢', 'Gewicht')}${b('mehr', '⋯', 'Mehr')}</nav>`;
+    return `<nav class="tabs">${b('heute', '◎', 'Heute')}${b('ziele', '◇', 'Ziele')}${b('training', '▤', 'Training')}${b('gewicht', '◢', 'Gewicht')}${b('mehr', '⋯', 'Mehr')}</nav>`;
   }
 
   function viewWelcome() {
@@ -87,8 +87,7 @@
     if (ws.due) out += `<div class="notice due"><div class="row between"><span>Wiegen fällig · ${C.PHASES[ws.phase].rhythm}</span></div>
       <div class="row" style="margin-top:10px"><input type="text" inputmode="decimal" placeholder="kg" id="quickKg" aria-label="Gewicht in kg"><button class="btn primary" data-act="quickWeight">Speichern</button></div></div>`;
     if (S.settings.heightCm && C.measurementDue(S.measurements, d)) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="measure"><span class="grow">Umfänge messen: neues Quartal</span><b>Messen</b></button>`;
-    const days = S.lastBackup ? C.diffDays(S.lastBackup.slice(0, 10), d) : null;
-    if (days === null || days > 14) out += `<button class="notice row" style="width:100%;border:0;text-align:left;color:var(--mu)" data-act="tab" data-arg="mehr"><span class="grow">${days === null ? 'Noch kein Backup erstellt' : `Letztes Backup vor ${days} Tagen`}</span><b>Sichern</b></button>`;
+    out += goalsMini(d);
     const active = S.habits.filter(h => !h.archived);
     if (!active.length) out += `<div class="card"><p class="muted" style="margin:0 0 12px">Lege deine erste Gewohnheit an.</p><button class="btn primary" data-act="open" data-arg="habitEdit">Gewohnheit anlegen</button></div>`;
     out += active.map(habitCard).join('');
@@ -298,35 +297,58 @@
   }
 
   // ===== GEWICHT =====
+  function weightTargets(ws) {
+    const t = new Set();
+    for (const h of S.habits) if (!h.archived && h.link === 'weightgoal' && h.goal) t.add(h.goal.kg);
+    for (const g of S.goals) if (g.type === 'weight' && Number(g.year) >= Number(today().slice(0, 4))) t.add(g.target);
+    t.add(88);
+    return [...t].filter(k => ws.avg !== null && k < ws.avg).sort((a, b) => b - a);
+  }
   function viewGewicht() {
-    const d = today(), ws = C.weightStatus(S.weights, d), th = C.thresholds(ws.phase);
-    const lastNavy = [...S.measurements].sort((a, b) => b.t.localeCompare(a.t))[0];
+    const d = today(), ws = C.weightStatus(S.weights, d), th = C.thresholds(ws.phase, ws);
+    const ms = [...S.measurements].sort((a, b) => a.t.localeCompare(b.t)), lastNavy = ms[ms.length - 1];
+    const tp = C.tempo(ws.daily, d);
+    const fcs = weightTargets(ws).map(k => { const f = C.forecast(ws.avg, tp, k, d); return f && f.date ? `${C.fmt(k)} kg voraussichtlich ${MONTHS[C.parseDay(f.date).getMonth()]} ${f.date.slice(0, 4)}` : null; }).filter(Boolean);
     let out = `<h1>Gewicht</h1><p class="sub">${C.PHASES[ws.phase].label}: ${C.PHASES[ws.phase].rhythm}</p>
       <div class="card"><div class="muted small">30-Tage-Durchschnitt</div><div class="big num">${C.fmt(ws.avg)} <span style="font-size:22px">kg</span></div>
-      <div class="phase" aria-hidden="true"><i class="${ws.phase >= 1 ? 'on' : ''}"></i><i class="${ws.phase >= 2 ? 'on' : ''}"></i><i class="${ws.phase >= 3 ? 'on' : ''}"></i></div>
+      <p class="num" style="margin:10px 0 0">${tp === null ? '<span class="muted">Tempo: noch zu wenige Werte in den letzten 8 Wochen</span>' : `Tempo: <b>${tp > 0 ? '+' : ''}${C.fmt(tp, 2)} kg/Woche</b> <span class="muted small">(letzte 8 Wochen)</span>`}</p>
+      ${fcs.length ? `<p class="muted small" style="margin:6px 0 0">${fcs.join('<br>')}</p><p class="faint small" style="margin:6px 0 0">Lineare Fortschreibung. Abnehmen wird mit der Zeit meist langsamer.</p>` : (tp !== null && tp >= -0.01 ? '<p class="muted small" style="margin:6px 0 0">Aktuell kein Abwärtstrend, daher keine Prognose.</p>' : '')}
       <p class="muted small" style="margin:10px 0 0">${[th.down ? 'Weiter: ' + th.down : '', th.up ? 'Zurück: ' + th.up : ''].filter(Boolean).join('<br>')}</p></div>
       <div class="card"><div class="row"><input type="text" inputmode="decimal" placeholder="kg" id="wKg" aria-label="Gewicht in kg"><button class="btn primary" data-act="addWeight">Speichern</button></div>
       <details style="margin-top:10px"><summary class="muted small">Für anderen Zeitpunkt eintragen</summary><input type="datetime-local" id="wWhen" style="margin-top:8px" value="${C.nowLocal()}"></details>
-      <p class="faint small" style="margin:10px 0 0">${ws.due ? 'Heute fällig.' : `Nächste Messung fällig ${ws.phase === 1 ? 'morgen' : ws.phase === 2 ? 'ab Montag' : 'ab dem 1. des nächsten Monats'}.`} Für den Durchschnitt zählt die erste Messung eines Tages.</p></div>
-      <div class="row between" style="margin:24px 0 0"><h2 style="margin:0">Verlauf</h2><div class="seg">${['3M', '1J', 'Alle'].map(r => `<button aria-pressed="${ui.range === r}" data-act="range" data-arg="${r}">${r}</button>`).join('')}</div></div>
+      <p class="faint small" style="margin:10px 0 0">${ws.due ? 'Heute fällig.' : `Nächste Messung fällig ${ws.phase === 1 ? 'morgen' : 'ab dem 1. des nächsten Monats'}.`} Für den Durchschnitt zählt die erste Messung eines Tages.</p></div>
+      <div class="row between" style="margin:24px 0 0"><h2 style="margin:0">Verlauf</h2><div class="seg">${['1M', '3M', '6M', '1J'].map(r => `<button aria-pressed="${ui.range === r}" data-act="range" data-arg="${r}">${r}</button>`).join('')}</div></div>
       ${chart(ws, d)}
-      <p class="faint small">Punkte: Tageswerte. Linie: 30-Tage-Durchschnitt. Gestrichelt: 99, 88 und 85 kg.</p>
-      <h2>Körperfett (Navy)</h2>
-      <div class="card">${lastNavy ? `<div class="big num">${C.fmt(lastNavy.fat)} <span style="font-size:22px">%</span></div><p class="muted small" style="margin:6px 0 12px">Gemessen am ${dNum(lastNavy.t)}: Hals ${C.fmt(lastNavy.neck)} cm, Bauch ${C.fmt(lastNavy.waist)} cm</p>` : '<p class="muted" style="margin:0 0 12px">Noch keine Navy-Messung.</p>'}
-      <button class="btn block" data-act="open" data-arg="measure">Umfänge eintragen</button></div>
+      <p class="faint small">Punkte: Tageswerte. Linie: 30-Tage-Durchschnitt. Gestrichelt: 99, 92, 88 und 85 kg, soweit im Bild.</p>
+      <h2>KFA (Navy)</h2>
+      <div class="card">${lastNavy ? `<div class="big num">${C.fmt(lastNavy.fat)} <span style="font-size:22px">%</span></div><p class="muted small" style="margin:6px 0 0">Zuletzt gemessen am ${dNum(lastNavy.t)}${lastNavy.neck ? `: Hals ${C.fmt(lastNavy.neck)} cm, Bauch ${C.fmt(lastNavy.waist)} cm` : ''}</p>${kfaChart(ms)}` : '<p class="muted" style="margin:0 0 12px">Noch keine Messung.</p>'}
+      <button class="btn block" style="margin-top:12px" data-act="open" data-arg="measure">Umfänge eintragen</button></div>
       <h2>Einträge</h2>${weightTable(12)}<button class="btn ghost block" data-act="open" data-arg="weights">Alle ${S.weights.length} Einträge</button>`;
     return out;
   }
+  function kfaChart(ms) {
+    if (ms.length < 2) return '';
+    const W = 400, H = 160, L = 30, R = 10, Tp = 10, B = 22;
+    const vals = ms.map(m => m.fat); let lo = Math.floor(Math.min(...vals) - 1), hi = Math.ceil(Math.max(...vals) + 1);
+    const a = ms[0].t.slice(0, 10), b = ms[ms.length - 1].t.slice(0, 10), span = Math.max(1, C.diffDays(a, b));
+    const X = t => L + (W - L - R) * C.diffDays(a, t.slice(0, 10)) / span, Y = v => Tp + (H - Tp - B) * (hi - v) / (hi - lo);
+    let g = '';
+    for (let v = lo; v <= hi; v += (hi - lo > 6 ? 2 : 1)) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="#2C2930"/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="#76707A">${v}</text>`;
+    const line = ms.map((m, i) => `${i ? 'L' : 'M'}${X(m.t).toFixed(1)},${Y(m.fat).toFixed(1)}`).join('');
+    const dots = ms.map(m => `<circle cx="${X(m.t).toFixed(1)}" cy="${Y(m.fat).toFixed(1)}" r="4" fill="#E3B66F"/>`).join('');
+    const lbl = [ms[0], ms[ms.length - 1]].map((m, i) => `<text x="${X(m.t)}" y="${H - 6}" font-size="11" fill="#76707A" text-anchor="${i ? 'end' : 'start'}">${dNum(m.t)}</text>`).join('');
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="KFA-Verlauf">${g}<path d="${line}" fill="none" stroke="#E3B66F" stroke-width="2"/>${dots}${lbl}</svg>`;
+  }
   function weightTable(n) {
     const list = [...S.weights].sort((a, b) => b.t.localeCompare(a.t)).slice(0, n);
-    return `<table class="t num">${list.map(w => `<tr><td>${dShort(w.t)} <span class="faint small">${w.t.slice(11, 16)}</span>${w.src === 'alt' ? ' <span class="badge">alte App</span>' : ''}</td><td>${w.fat ? `<span class="faint small">${C.fmt(w.fat)} %</span> ` : ''}<b>${C.fmt(w.kg)}</b> kg <button class="btn sm ghost" style="min-height:30px;padding:2px 8px;margin-left:6px" data-act="delWeight" data-arg="${w.t}:${w.kg}" aria-label="Eintrag löschen">×</button></td></tr>`).join('')}</table>`;
+    return `<table class="t num">${list.map(w => `<tr><td>${dShort(w.t)} <span class="faint small">${w.t.slice(11, 16)}</span>${w.src === 'alt' ? ' <span class="badge">alte App</span>' : ''}</td><td><b>${C.fmt(w.kg)}</b> kg <button class="btn sm ghost" style="min-height:30px;padding:2px 8px;margin-left:6px" data-act="delWeight" data-arg="${w.t}:${w.kg}" aria-label="Eintrag löschen">×</button></td></tr>`).join('')}</table>`;
   }
   function chart(ws, d) {
     if (!ws.daily.length) return '<p class="muted">Noch keine Werte.</p>';
-    const from = ui.range === '3M' ? C.addDays(d, -91) : ui.range === '1J' ? C.addDays(d, -365) : ws.daily[0].d;
+    const from = C.addDays(d, -({ '1M': 30, '3M': 91, '6M': 182, '1J': 365 }[ui.range] || 91));
     const pts = ws.daily.filter(x => x.d >= from);
     const avg = [];
-    const step = ui.range === 'Alle' ? 3 : 1;
+    const step = 1;
     let i = 0;
     for (const day of C.dayRange(from < ws.daily[0].d ? ws.daily[0].d : from, d)) { if (i++ % step === 0) { const a = C.avg30(ws.daily, day); if (a !== null) avg.push({ d: day, kg: a }); } }
     const vals = pts.map(p => p.kg).concat(avg.map(a => a.kg));
@@ -339,7 +361,7 @@
     let g = '';
     const stepY = hi - lo > 20 ? 5 : 2;
     for (let v = Math.ceil(lo / stepY) * stepY; v <= hi; v += stepY) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="#2C2930"/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="#76707A">${v}</text>`;
-    for (const ref of [99, 88, 85]) if (ref >= lo && ref <= hi) g += `<line x1="${L}" x2="${W - R}" y1="${Y(ref)}" y2="${Y(ref)}" stroke="#E3B66F" stroke-dasharray="5 5" stroke-width="1.2"/>`;
+    for (const ref of [99, 92, 88, 85]) if (ref >= lo && ref <= hi) g += `<line x1="${L}" x2="${W - R}" y1="${Y(ref)}" y2="${Y(ref)}" stroke="#E3B66F" stroke-dasharray="5 5" stroke-width="1.2"/>`;
     // Monatsmarken
     let mk = C.monthStart(C.addDays(from, 31)), lastLabel = -99;
     while (mk <= d) { const x = X(mk); if (x - lastLabel > 46) { g += `<text x="${x}" y="${H - 6}" font-size="11" fill="#76707A" text-anchor="middle">${MONTHS[Number(mk.slice(5, 7)) - 1].slice(0, 3)}${mk.slice(5, 7) === '01' ? ' ' + mk.slice(2, 4) : ''}</text>`; lastLabel = x; } mk = C.monthStart(C.addDays(C.monthEnd(mk), 1)); }
@@ -358,14 +380,14 @@
       <label class="f"><span>Datum</span><input type="date" id="mDate" value="${today()}"></label>
       <p class="big num" id="navyOut" style="font-size:34px;margin:6px 0 18px">– %</p>
       <button class="btn primary block" data-act="saveMeasure">Speichern</button>
-      ${S.measurements.length ? `<h2>Bisherige Messungen</h2><table class="t num">${[...S.measurements].sort((a, b) => b.t.localeCompare(a.t)).map(m => `<tr><td>${dNum(m.t)} <span class="faint small">Hals ${C.fmt(m.neck)}, Bauch ${C.fmt(m.waist)}</span></td><td><b>${C.fmt(m.fat)} %</b> <button class="btn sm ghost" style="min-height:30px;padding:2px 8px" data-act="delMeasure" data-arg="${m.t}" aria-label="Messung löschen">×</button></td></tr>`).join('')}</table>` : ''}`;
+      ${S.measurements.length ? `<h2>Bisherige Messungen</h2><table class="t num">${[...S.measurements].sort((a, b) => b.t.localeCompare(a.t)).map(m => `<tr><td>${dNum(m.t)} <span class="faint small">${m.neck ? `Hals ${C.fmt(m.neck)}, Bauch ${C.fmt(m.waist)}` : 'ohne Umfänge'}</span></td><td><b>${C.fmt(m.fat)} %</b> <button class="btn sm ghost" style="min-height:30px;padding:2px 8px" data-act="delMeasure" data-arg="${m.t}" aria-label="Messung löschen">×</button></td></tr>`).join('')}</table>` : ''}`;
   }
 
   // ===== MEHR =====
   function viewMehr() {
     const bk = S.lastBackup ? `Letztes Backup: ${dNum(S.lastBackup)}` : 'Noch kein Backup erstellt.';
     return `<h1>Mehr</h1><p class="sub">Daten, Einstellungen und Verwaltung</p>
-      <h2>Backup</h2><div class="card"><p class="muted" style="margin:0 0 12px">${bk} Deine Daten liegen nur auf diesem Handy. Ein Backup schützt sie, falls Chrome-Daten gelöscht werden.</p>
+      <h2>Backup</h2><div class="card"><p class="muted" style="margin:0 0 12px">${bk} Deine Daten liegen nur auf diesem Handy. Alle 7 Tage speichert die App beim ersten Tippen nach dem Öffnen automatisch ein Backup in „Downloads“.</p>
       <button class="btn primary block" data-act="backup">Backup speichern</button>
       ${navigator.canShare ? '<div style="height:10px"></div><button class="btn block" data-act="shareBackup">Backup teilen (z. B. in Google Drive)</button>' : ''}
       <div style="height:10px"></div><label class="btn ghost block" style="display:grid;place-items:center">Backup wiederherstellen<input type="file" accept=".json,application/json" data-change="restore" hidden></label>
@@ -377,7 +399,7 @@
       <h2>Einstellungen</h2>
       <label class="f"><span>Körpergröße in cm (für die Navy-Methode)</span><input type="text" inputmode="decimal" value="${S.settings.heightCm || ''}" data-change="height"></label>
       <p class="faint small" id="persist">Speicherstatus wird geprüft …</p>
-      <p class="faint small">Dein Leben, Version 1.0.1</p>`;
+      <p class="faint small">Dein Leben, Version 2.0.2</p>`;
   }
   function screenHabits() {
     const row = h => `<button class="pick" data-act="open" data-arg="habit:${h.id}"><span>${esc(h.emoji)} ${esc(h.name)}</span><span class="faint small">${h.archived ? 'archiviert' : ''} ›</span></button>`;
@@ -385,8 +407,90 @@
     return header('Gewohnheiten', `<button class="btn sm ghost" data-act="open" data-arg="habitEdit">Neu</button>`) + a.map(row).join('') + (z.length ? `<h2>Archiviert</h2>${z.map(row).join('')}` : '');
   }
 
-  const TABS = { heute: viewHeute, training: viewTraining, gewicht: viewGewicht, mehr: viewMehr };
-  const SCREENS = { habit: screenHabit, habitEdit: screenHabitEdit, session: screenSession, move: screenMove, exercises: screenExercises, exEdit: screenExEdit, pauses: screenPauses, weights: screenWeights, measure: screenMeasure, habits: screenHabits };
+  // ===== ZIELE =====
+  const GTYPES = { habit: 'Gewohnheit: Tage im Jahr', trainings: 'Trainingseinheiten (Studio)', weight: 'Gewicht: 30-Tage-Ø am 31.12.' };
+  function goalYears() { const y = Number(today().slice(0, 4)); return [String(y), String(y + 1)]; }
+  function defaultGoalYear() { const [a, b] = goalYears(); return S.goals.some(g => String(g.year) === a) ? a : b; }
+  function bar(frac, sollFrac, color) {
+    const f = Math.max(0, Math.min(1, frac || 0)), sf = sollFrac === null || sollFrac === undefined ? null : Math.max(0, Math.min(1, sollFrac));
+    return `<div class="gbar"><i style="width:${(f * 100).toFixed(1)}%;background:${color}"></i>${sf !== null ? `<b style="left:${(sf * 100).toFixed(1)}%" title="Soll"></b>` : ''}</div>`;
+  }
+  function goalCard(g, lock) {
+    const p = C.goalProgress(S, g, today());
+    let body = '';
+    if (g.type === 'habit') {
+      const h = S.habits.find(x => x.id === g.habitId);
+      if (p.missing) body = '<p class="muted">Die verknüpfte Gewohnheit gibt es nicht mehr.</p>';
+      else if (!p.started) body = `<p class="muted" style="margin:0">Zählt ab 01.01.${g.year}: ${esc(h.emoji)} ${esc(h.name)}. Ziel: ${g.target} Tage.</p>`;
+      else body = `<div class="big num" style="font-size:34px">${p.value} <span class="muted" style="font-size:18px">/ ${g.target} Tage</span></div>${bar(p.value / g.target, p.soll / g.target, h.color)}
+        <p class="muted small" style="margin:8px 0 0">${p.value >= p.soll ? 'Bisher jeder Tag bestätigt.' : `${p.soll - p.value} von ${p.soll} Tagen ohne Bestätigung.`} Aktuelle Serie: ${p.streak} Tage.</p>`;
+    } else if (g.type === 'trainings') {
+      const diff = p.value - Math.round(p.soll);
+      body = !p.started ? `<p class="muted" style="margin:0">Zählt ab 01.01.${g.year}: ${g.target} Studio-Einheiten, also etwa ${C.fmt(g.target / 52, 1)} pro Woche.</p>`
+        : `<div class="big num" style="font-size:34px">${p.value} <span class="muted" style="font-size:18px">/ ${g.target}</span></div>${bar(p.value / g.target, p.soll / g.target, '#9C735B')}
+        <p class="muted small" style="margin:8px 0 0">Soll bis heute: ${Math.round(p.soll)}. ${diff === 0 ? 'Genau im Plan.' : diff > 0 ? `${diff} vor dem Plan.` : `${-diff} hinter dem Plan.`}</p>`;
+    } else if (g.type === 'weight') {
+      const weeksLeft = Math.max(1, C.diffDays(today(), `${g.year}-12-31`) / 7);
+      const need = p.value !== null ? (g.target - p.value) / weeksLeft : null;
+      const fc = p.fc && p.fc.date ? `Bei aktuellem Tempo: ${C.fmt(g.target)} kg voraussichtlich ${MONTHS[C.parseDay(p.fc.date).getMonth()]} ${p.fc.date.slice(0, 4)}.` : (p.fc && p.fc.none ? 'Aktuell kein Abwärtstrend, daher keine Prognose.' : '');
+      const frac = p.startAvg !== null && p.startAvg !== g.target ? (p.startAvg - p.value) / (p.startAvg - g.target) : null;
+      const sollFrac = p.started ? (C.diffDays(`${g.year}-01-01`, today()) + 1) / C.daysInYear(g.year) : null;
+      body = `<div class="big num" style="font-size:34px">${C.fmt(p.value)} <span class="muted" style="font-size:18px">→ ${C.fmt(g.target)} kg</span></div>
+        ${p.started && frac !== null ? bar(frac, sollFrac, '#8FB3A0') : ''}
+        <p class="muted small" style="margin:8px 0 0">${p.started && p.soll !== null ? `Soll heute: ${C.fmt(p.soll)} kg (Start 01.01.: ${C.fmt(p.startAvg)} kg). ` : `Gilt der 30-Tage-Ø am 31.12.${g.year}. `}${need !== null && need < 0 ? `Nötiges Tempo: ${C.fmt(need, 2)} kg/Woche. ` : ''}${p.tempo !== null && p.tempo !== undefined ? `Aktuell: ${C.fmt(p.tempo, 2)} kg/Woche.` : ''}</p>
+        ${fc ? `<p class="faint small" style="margin:4px 0 0">${fc}</p>` : ''}`;
+    }
+    return `<div class="card"><div class="row between" style="align-items:flex-start"><div class="grow"><h3>${esc(g.title)}</h3><p class="faint small" style="margin:2px 0 12px">${GTYPES[g.type]}</p></div>
+      ${lock.editable ? `<button class="btn sm ghost" data-act="open" data-arg="goalEdit:${g.id}">Ändern</button>` : '<span class="faint" aria-label="gesperrt">🔒</span>'}</div>${body}</div>`;
+  }
+  function viewZiele() {
+    const years = goalYears(); ui.goalYear = ui.goalYear || defaultGoalYear();
+    const y = ui.goalYear, lock = C.lockState(y, today()), gs = S.goals.filter(g => String(g.year) === y);
+    let out = `<h1>Ziele ${y}</h1><p class="sub">${lock.label}</p>
+      <div class="seg" style="margin:0 0 14px">${years.map(v => `<button aria-pressed="${v === y}" data-act="goalYear" data-arg="${v}">${v}</button>`).join('')}</div>`;
+    out += gs.map(g => goalCard(g, lock)).join('');
+    if (!gs.length) out += `<div class="card"><p class="muted" style="margin:0">${lock.editable ? `Noch keine Ziele für ${y}. Du kannst bis zu drei festlegen.` : `Für ${y} sind keine Ziele festgelegt.`}</p></div>`;
+    if (lock.editable && gs.length < 3) out += `<button class="btn primary block" data-act="open" data-arg="goalEdit::${y}">Ziel hinzufügen (${gs.length}/3)</button>`;
+    if (!lock.editable) out += `<p class="faint small">${lock.next ? `Ab ${dNum(lock.next)} bis 30.06.${y} kannst du die Ziele mit Begründung anpassen.` : `Die Ziele für ${y} sind bis Jahresende fest.`}</p>`;
+    else if (!lock.needsReason) out += `<p class="faint small">Ab 01.01.${y} sind die Ziele gesperrt, außer vom 24. bis 30.06.${y}.</p>`;
+    const log = S.goalLog.filter(l => String(l.year) === y).slice().reverse();
+    if (log.length) out += `<h2>Änderungsverlauf</h2>` + log.map(l => `<div class="list-item" style="display:block"><b>${dNum(l.t)}</b> <span class="muted small">${{ add: 'hinzugefügt', edit: 'geändert', delete: 'gelöscht' }[l.action]}: ${esc(l.title)}</span>${l.reason ? `<br><span class="small">Begründung: ${esc(l.reason)}</span>` : ''}</div>`).join('');
+    return out;
+  }
+  function goalsMini(d) {
+    const y = d.slice(0, 4), cur = S.goals.filter(g => String(g.year) === y);
+    if (cur.length) {
+      const rows = cur.map(g => { const p = C.goalProgress(S, g, d);
+        const txt = g.type === 'weight' ? `${C.fmt(p.value)} → ${C.fmt(g.target)} kg` : `${p.value} / ${g.target}${g.type === 'trainings' ? ` (Soll ${Math.round(p.soll)})` : ''}`;
+        return `<div class="row between small" style="padding:4px 0"><span class="grow">${esc(g.title)}</span><b class="num">${txt}</b></div>`; }).join('');
+      return `<button class="card" style="width:100%;border:0;text-align:left;display:block" data-act="tab" data-arg="ziele"><div class="muted small" style="margin:0 0 6px">Ziele ${y}</div>${rows}</button>`;
+    }
+    const ny = String(Number(y) + 1), next = S.goals.filter(g => String(g.year) === ny), lk = C.lockState(ny, d);
+    return `<button class="notice row" style="width:100%;border:0;text-align:left" data-act="tab" data-arg="ziele"><span class="grow">Ziele ${ny}: ${next.length} von 3 festgelegt · ${lk.label.toLowerCase()}</span><b>›</b></button>`;
+  }
+  function screenGoalEdit({ id, year }) {
+    const g = id ? S.goals.find(x => x.id === id) : null;
+    const y = g ? String(g.year) : year, lock = C.lockState(y, today());
+    if (!lock.editable) return header('Ziel') + `<p class="muted">${lock.label}.</p>`;
+    const v = g || { title: '', type: 'trainings', target: 100, habitId: '' };
+    const habits = S.habits.filter(h => !h.archived && h.type === 'daily');
+    const show = t => v.type === t ? '' : 'hidden';
+    return `${header(g ? 'Ziel ändern' : `Neues Ziel ${y}`)}
+      <label class="f"><span>Titel</span><input type="text" id="gTitle" value="${esc(v.title)}" placeholder="100 Trainingseinheiten"></label>
+      <label class="f"><span>Art</span><select id="gType" data-change="goalType">${Object.entries(GTYPES).map(([k, l]) => `<option value="${k}" ${k === v.type ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label class="f" data-gtype="habit" ${show('habit')}><span>Gewohnheit</span><select id="gHabit">${habits.map(h => `<option value="${h.id}" ${h.id === v.habitId ? 'selected' : ''}>${esc(h.emoji)} ${esc(h.name)}</option>`).join('')}</select></label>
+      <label class="f" data-gtype="habit" ${show('habit')}><span>Ziel: Tage in ${y} (alle Tage = ${C.daysInYear(y)})</span><input type="text" inputmode="numeric" id="gTargetHabit" value="${v.type === 'habit' ? v.target : C.daysInYear(y)}"></label>
+      <label class="f" data-gtype="trainings" ${show('trainings')}><span>Ziel: Studio-Einheiten in ${y}</span><input type="text" inputmode="numeric" id="gTargetTr" value="${v.type === 'trainings' ? v.target : 100}"></label>
+      <label class="f" data-gtype="weight" ${show('weight')}><span>Ziel: 30-Tage-Ø am 31.12.${y} höchstens (kg)</span><input type="text" inputmode="decimal" id="gTargetW" value="${v.type === 'weight' ? C.fmt(v.target) : ''}" placeholder="92"></label>
+      ${lock.needsReason ? `<label class="f"><span>Begründung (Pflicht im Halbjahresfenster)</span><textarea id="gReason" placeholder="Warum passt du das Ziel an?"></textarea></label>` : ''}
+      <button class="btn primary block" data-act="saveGoal" data-arg="${g ? g.id : ''}:${y}">Speichern</button>
+      ${g ? `<div style="height:10px"></div><button class="btn danger block" data-act="deleteGoal" data-arg="${g.id}">Ziel löschen</button>` : ''}`;
+  }
+  function logGoal(year, action, title, reason) { S.goalLog.push({ t: C.nowLocal(), year: String(year), action, title, reason: reason || '' }); }
+
+  const TABS = { heute: viewHeute, ziele: viewZiele, training: viewTraining, gewicht: viewGewicht, mehr: viewMehr };
+  const TAB_ORDER = ['heute', 'ziele', 'training', 'gewicht', 'mehr'];
+  const SCREENS = { habit: screenHabit, habitEdit: screenHabitEdit, session: screenSession, move: screenMove, exercises: screenExercises, exEdit: screenExEdit, pauses: screenPauses, weights: screenWeights, measure: screenMeasure, habits: screenHabits, goalEdit: screenGoalEdit };
 
   // ---------- Sheets ----------
   const SHEETS = {
@@ -438,9 +542,38 @@
 
   const ACTIONS = {
     tab: a => { ui.tab = a; ui.stack = []; render(); window.scrollTo(0, 0); },
+    goalYear: a => { ui.goalYear = a; render(); },
+    saveGoal: a => {
+      const [id, y] = a.split(':'); const lock = C.lockState(y, today());
+      if (!lock.editable) return toast('Die Ziele sind gerade gesperrt.');
+      const title = document.getElementById('gTitle').value.trim(); if (!title) return toast('Gib dem Ziel einen Titel.');
+      const type = document.getElementById('gType').value;
+      const reasonEl = document.getElementById('gReason'), reason = reasonEl ? reasonEl.value.trim() : '';
+      if (lock.needsReason && reason.length < 10) return toast('Bitte begründe die Änderung in einem Satz.');
+      let target;
+      if (type === 'habit') { target = Math.round(C.num(document.getElementById('gTargetHabit').value) || 0); if (!document.getElementById('gHabit').value) return toast('Lege zuerst eine tägliche Gewohnheit an.'); }
+      if (type === 'trainings') target = Math.round(C.num(document.getElementById('gTargetTr').value) || 0);
+      if (type === 'weight') target = C.num(document.getElementById('gTargetW').value);
+      if (!target || target <= 0 || (type === 'habit' && target > C.daysInYear(y)) || (type === 'weight' && (target < 30 || target > 300))) return toast('Prüfe den Zielwert.');
+      if (!id && S.goals.filter(g => String(g.year) === y).length >= 3) return toast('Maximal drei Ziele pro Jahr.');
+      const g = id ? S.goals.find(x => x.id === id) : { id: uid('g'), year: y, createdAt: C.nowLocal() };
+      g.title = title; g.type = type; g.target = target; g.habitId = type === 'habit' ? document.getElementById('gHabit').value : null;
+      if (!id) S.goals.push(g);
+      logGoal(y, id ? 'edit' : 'add', title, reason);
+      save(); pop(); toast('Ziel gespeichert');
+    },
+    deleteGoal: a => {
+      const g = S.goals.find(x => x.id === a); const lock = C.lockState(g.year, today());
+      if (!lock.editable) return toast('Die Ziele sind gerade gesperrt.');
+      const reasonEl = document.getElementById('gReason'), reason = reasonEl ? reasonEl.value.trim() : '';
+      if (lock.needsReason && reason.length < 10) return toast('Bitte begründe das Löschen im Feld „Begründung“.');
+      if (!confirm('Ziel löschen?')) return;
+      S.goals = S.goals.filter(x => x.id !== a); logGoal(g.year, 'delete', g.title, reason); save(); pop();
+    },
     back: () => pop(),
     open: a => { const [n, ...rest] = a.split(':'); const v = rest.join(':');
       if (n === 'habit' || n === 'session' || n === 'move' || n === 'habitEdit') { ui.draftColor = null; push(n, { id: v || null }); }
+      else if (n === 'goalEdit') { const [id, y] = v.split(':'); push('goalEdit', { id: id || null, year: y || null }); }
       else if (n === 'exEdit') { const [id, sid] = v.split(':'); push('exEdit', { id: id || null, sessionId: sid || null }); }
       else push(n); },
     dismiss: a => { S.notices.splice(Number(a), 1); save(); render(); },
@@ -570,8 +703,28 @@
     sessDate: (el, a) => { const s = S.sessions.find(x => x.id === a); if (!el.value) return; const y = el.value.slice(0, 4); if (y !== s.date.slice(0, 4)) s.num = C.nextNum(S, y); s.date = el.value; save(); render(); },
     moveField: (el, a) => INPUTS.moveField(el, a),
     itemDone: (el, a) => { const [sid, idx] = a.split(':'); S.sessions.find(x => x.id === sid).items[Number(idx)].done = el.checked; save(); },
+    goalType: el => { document.querySelectorAll('[data-gtype]').forEach(x => { x.hidden = x.dataset.gtype !== el.value; }); },
     height: el => { const v = C.num(el.value); S.settings.heightCm = v; save(); toast(v ? `Körpergröße ${C.fmt(v, 0)} cm` : 'Körpergröße entfernt'); }
   };
+
+  // Wöchentliches Backup beim ersten Tippen (Downloads brauchen eine Nutzeraktion)
+  const backupDue = () => S && (!S.lastBackup || C.diffDays(S.lastBackup.slice(0, 10), today()) >= 7);
+  document.addEventListener('click', e => { if (backupDue() && !e.target.closest('[data-act=backup],[data-act=shareBackup]')) { download(backupName(), backupText()); toast('Wöchentliches Backup gespeichert (Downloads)'); } }, true);
+  // Wischen zwischen den Hauptseiten; Ränder bleiben für die Zurück-Geste von Android frei
+  let sw = null;
+  document.addEventListener('touchstart', e => {
+    const t = e.touches[0];
+    sw = (e.touches.length === 1 && S && !ui.stack.length && !ui.sheet && t.clientX > 32 && t.clientX < window.innerWidth - 32 && !e.target.closest('input,textarea,select,[data-noswipe]'))
+      ? { x: t.clientX, y: t.clientY, t: Date.now() } : null;
+  }, { passive: true });
+  document.addEventListener('touchend', e => {
+    if (!sw) return; const t = e.changedTouches[0], dx = t.clientX - sw.x, dy = t.clientY - sw.y, dt = Date.now() - sw.t; sw = null;
+    if (dt > 700 || Math.abs(dx) < 70 || Math.abs(dx) < 2 * Math.abs(dy)) return;
+    const i = TAB_ORDER.indexOf(ui.tab), j = i + (dx < 0 ? 1 : -1);
+    if (j < 0 || j >= TAB_ORDER.length) return;
+    ui.tab = TAB_ORDER[j]; render(); window.scrollTo(0, 0);
+    const m = $app.querySelector('main'); if (m) m.classList.add(dx < 0 ? 'in-right' : 'in-left');
+  }, { passive: true });
 
   document.addEventListener('click', e => {
     const el = e.target.closest('[data-act]');

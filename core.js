@@ -48,16 +48,33 @@
     for (const k of ['habits', 'weights', 'exercises', 'sessions']) if (!Array.isArray(s[k])) throw new Error(`Die Datei ist unvollständig (${k} fehlt).`);
     s.checks = s.checks || {}; s.measurements = s.measurements || []; s.pauses = s.pauses || [];
     s.settings = s.settings || {}; s.notices = s.notices || [];
+    s.goals = s.goals || []; s.goalLog = s.goalLog || [];
+    migrateKfa(s);
     return s;
+  }
+  // Alte KFA-Werte (selbst nach Navy gemessen) ab 06.05.2026 als Messungen übernehmen, nur echte Änderungen
+  function migrateKfa(s) {
+    if (s.settings.kfaMigrated) return;
+    let last = null;
+    for (const w of [...s.weights].filter(w => w.src === 'alt' && w.fat).sort((a, b) => a.t.localeCompare(b.t))) {
+      if (w.t.slice(0, 10) < '2026-05-06') { last = w.fat; continue; }
+      if (w.fat !== last && !s.measurements.some(m => m.t.slice(0, 10) === w.t.slice(0, 10)))
+        s.measurements.push({ t: w.t.slice(0, 10) + 'T12:00', neck: null, waist: null, fat: w.fat, src: 'alt' });
+      last = w.fat;
+    }
+    s.settings.kfaMigrated = true;
   }
 
   // ---------- Gewicht und Phasen ----------
   const PHASES = {
     1: { label: 'Phase 1', rhythm: 'täglich wiegen' },
-    2: { label: 'Phase 2', rhythm: 'wöchentlich wiegen' },
-    3: { label: 'Phase 3', rhythm: 'monatlich wiegen' }
+    3: { label: 'Phase 2', rhythm: 'monatlich wiegen' }
   };
-  const T = { p1to2: 99.0, p2to3: 88.0, p2to1: 100.0, p3to2: 89.0 };
+  // Täglich, bis der 30-Tage-Ø ≤ 88 kg ist; dann monatlich.
+  // Erste Messung eines Tages über 89,9 kg in der Monatsphase -> wieder täglich (Rückfall).
+  // Nach einem Rückfall frühestens nach 14 Wiegetagen zurück auf monatlich, wenn der 30-Tage-Ø ≤ 88 kg ist.
+  // Interne Codes: 1 = täglich, 3 = monatlich
+  const T = { p1to3: 88.0, relapse: 89.9, relapseDays: 14 };
 
   // erste Messung je Tag
   function dailyFirst(weights) {
@@ -80,21 +97,14 @@
     return n ? sum / n : last;
   }
   function step(phase, a) {
-    if (a === null) return phase;
-    for (let i = 0; i < 3; i++) {
-      const before = phase;
-      if (phase === 1 && a <= T.p1to2) phase = 2;
-      else if (phase === 2 && a <= T.p2to3) phase = 3;
-      else if (phase === 2 && a > T.p2to1) phase = 1;
-      else if (phase === 3 && a > T.p3to2) phase = 2;
-      if (phase === before) break;
-    }
+    if (a !== null && phase === 1 && a <= T.p1to3) return 3;
     return phase;
   }
   function weightStatus(weights, today = todayStr()) {
     const daily = dailyFirst(weights);
     if (!daily.length) return { phase: 1, avg: null, daily, switches: [], due: true, lastDay: null };
-    let phase = 1; const switches = [];
+    let phase = 1, relapse = null; const switches = [];
+    const first = new Map(daily.map(x => [x.d, x.kg]));
     // Fenster gleitend über alle Tage
     let i0 = 0, i1 = 0, sum = 0, last = null;
     for (const d of dayRange(daily[0].d, today)) {
@@ -102,19 +112,44 @@
       const from = addDays(d, -29);
       while (i0 < i1 && daily[i0].d < from) { sum -= daily[i0].kg; i0++; }
       const n = i1 - i0; const a = n ? sum / n : last;
-      const p = step(phase, a);
+      let p = phase;
+      if (phase === 3 && first.has(d) && first.get(d) > T.relapse) { p = 1; relapse = { d, n: 1 }; }
+      else if (phase === 1) {
+        if (relapse && first.has(d) && d !== relapse.d) relapse.n++;
+        if ((!relapse || relapse.n >= T.relapseDays) && step(phase, a) === 3) { p = 3; relapse = null; }
+      }
       if (p !== phase) { switches.push({ d, from: phase, to: p, avg: a }); phase = p; }
     }
     const avg = avg30(daily, today);
     const lastDay = daily[daily.length - 1].d;
-    const since = phase === 1 ? today : phase === 2 ? weekStart(today) : monthStart(today);
+    const since = phase === 1 ? today : monthStart(today);
     const due = lastDay < since;
-    return { phase, avg, daily, switches, due, lastDay, since };
+    return { phase, avg, daily, switches, due, lastDay, since, relapse };
   }
-  function thresholds(phase) {
-    if (phase === 1) return { down: `≤ ${fmt(T.p1to2)} kg → Phase 2`, up: null };
-    if (phase === 2) return { down: `≤ ${fmt(T.p2to3)} kg → Phase 3`, up: `> ${fmt(T.p2to1)} kg → Phase 1` };
-    return { down: null, up: `> ${fmt(T.p3to2)} kg → Phase 2` };
+  function thresholds(phase, ws) {
+    if (phase === 1 && ws && ws.relapse) {
+      const left = Math.max(0, T.relapseDays - ws.relapse.n);
+      return { down: left ? `Rückfallphase seit ${ws.relapse.d.split('-').reverse().join('.')}: noch ${left} Wiegetage, danach 30-Tage-Ø ≤ ${fmt(T.p1to3)} kg → Phase 2 (monatlich)` : `30-Tage-Ø ≤ ${fmt(T.p1to3)} kg → Phase 2 (monatlich)`, up: null };
+    }
+    if (phase === 1) return { down: `30-Tage-Ø ≤ ${fmt(T.p1to3)} kg → Phase 2 (monatlich)`, up: null };
+    return { down: null, up: `erste Messung eines Tages über ${fmt(T.relapse)} kg → Phase 1 (täglich, mindestens ${T.relapseDays} Wiegetage)` };
+  }
+  // Tempo: lineare Regression der Tageswerte der letzten 8 Wochen, in kg pro Woche
+  function tempo(daily, today = todayStr(), days = 56) {
+    const from = addDays(today, -days + 1);
+    const pts = daily.filter(x => x.d >= from && x.d <= today).map(x => [diffDays(from, x.d), x.kg]);
+    if (pts.length < 4 || pts[pts.length - 1][0] - pts[0][0] < 14) return null;
+    const n = pts.length, mx = pts.reduce((a, p) => a + p[0], 0) / n, my = pts.reduce((a, p) => a + p[1], 0) / n;
+    let sxy = 0, sxx = 0; for (const [x, y] of pts) { sxy += (x - mx) * (y - my); sxx += (x - mx) ** 2; }
+    return sxx ? (sxy / sxx) * 7 : null;
+  }
+  // Prognose: ab heutigem 30-Tage-Ø mit aktuellem Tempo bis Zielgewicht
+  function forecast(avg, kgPerWeek, target, today = todayStr()) {
+    if (avg === null || kgPerWeek === null || avg <= target) return null;
+    if (kgPerWeek >= -0.01) return { none: true };
+    const weeks = (avg - target) / -kgPerWeek;
+    if (weeks > 520) return { none: true };
+    return { date: addDays(today, Math.round(weeks * 7)), weeks };
   }
   const navyFat = (height, neck, waist) => {
     if (!height || !neck || !waist || waist <= neck) return null;
@@ -215,6 +250,43 @@
     return out;
   }
 
+  // ---------- Jahresziele ----------
+  const daysInYear = y => diffDays(`${y}-01-01`, `${y}-12-31`) + 1;
+  // Bis 31.12. des Vorjahres frei; 24.–30.06. Fenster mit Begründung; sonst gesperrt
+  function lockState(year, today = todayStr()) {
+    const y = String(year);
+    if (today < `${y}-01-01`) return { editable: true, needsReason: false, until: `${Number(y) - 1}-12-31`, label: `Änderbar bis 31.12.${Number(y) - 1}` };
+    if (today >= `${y}-06-24` && today <= `${y}-06-30`) return { editable: true, needsReason: true, until: `${y}-06-30`, label: `Halbjahresfenster: änderbar bis 30.06.${y}, mit Begründung` };
+    if (today < `${y}-06-24`) return { editable: false, next: `${y}-06-24`, label: `Gesperrt bis 24.06.${y}` };
+    return { editable: false, next: null, label: `Gesperrt bis Jahresende` };
+  }
+  function goalProgress(state, g, today = todayStr()) {
+    const y = String(g.year), start = `${y}-01-01`, end = `${y}-12-31`;
+    const started = today >= start, endDay = today < end ? today : end;
+    const elapsed = started ? diffDays(start, endDay) + 1 : 0, total = daysInYear(y);
+    if (g.type === 'habit') {
+      const h = state.habits.find(x => x.id === g.habitId);
+      if (!h) return { started, missing: true };
+      const days = checkedDays(state, h); let n = 0;
+      if (started) for (const d of dayRange(start, endDay)) if (days.has(d)) n++;
+      const st = habitStats(state, h, today);
+      return { started, value: n, target: g.target, soll: elapsed, streak: st.cur, done: n >= g.target };
+    }
+    if (g.type === 'trainings') {
+      const n = state.sessions.filter(s => s.kind === 'training' && s.date >= start && s.date <= endDay && (s.done || (s.items && s.items.length))).length;
+      const soll = g.target * elapsed / total;
+      return { started, value: n, target: g.target, soll, done: n >= g.target };
+    }
+    if (g.type === 'weight') {
+      const ws = weightStatus(state.weights, today);
+      const startAvg = started ? avg30(ws.daily, addDays(start, -1)) : null;
+      const soll = startAvg !== null ? startAvg + (g.target - startAvg) * elapsed / total : null;
+      const tp = tempo(ws.daily, today);
+      return { started, value: ws.avg, target: g.target, soll, startAvg, tempo: tp, fc: forecast(ws.avg, tp, g.target, today), done: today >= end && ws.avg !== null && avg30(ws.daily, end) <= g.target };
+    }
+    return { started };
+  }
+
   // ---------- Training ----------
   const TYPES = {
     weight: 'Gewicht × Wdh.', assist: 'Gegengewicht × Wdh.', reps: 'Nur Wiederholungen',
@@ -257,7 +329,7 @@
   const api = {
     pad, iso, parseDay, addDays, diffDays, weekStart, monthStart, monthEnd, yearStart, quarterStart, todayStr, nowLocal, dayRange,
     num, fmt, fmtW, emptyState, validate, PHASES, T, dailyFirst, avg30, weightStatus, thresholds, navyFat, measurementDue,
-    checkedDays, habitStats, targetAt, checkGoals, weekCount, TYPES, CATS, exById, nextNum, trainings, lastItem, pauseFor, setSummary
+    checkedDays, habitStats, targetAt, tempo, forecast, lockState, goalProgress, daysInYear, checkGoals, weekCount, TYPES, CATS, exById, nextNum, trainings, lastItem, pauseFor, setSummary
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
 })(typeof self !== 'undefined' ? self : this);

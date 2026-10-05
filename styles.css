@@ -47,8 +47,8 @@ label.f>span{display:block;font-size:13px;color:var(--mu);margin:0 0 6px}
 .fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 /* Tabbar */
 nav.tabs{position:fixed;left:0;right:0;bottom:0;background:rgba(20,19,22,.96);border-top:1px solid var(--line);
-  display:grid;grid-template-columns:repeat(4,1fr);padding:6px 6px calc(6px + env(safe-area-inset-bottom));z-index:5}
-nav.tabs button{border:0;background:transparent;color:var(--fa);padding:8px 0;border-radius:12px;font-size:13px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:2px}
+  display:grid;grid-template-columns:repeat(5,1fr);padding:6px 6px calc(6px + env(safe-area-inset-bottom));z-index:5}
+nav.tabs button{border:0;background:transparent;color:var(--fa);padding:8px 0;border-radius:12px;font-size:12px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:2px}
 nav.tabs button .ic{font-size:20px;line-height:1.1}
 nav.tabs button[aria-current=page]{color:var(--tx);background:var(--s1)}
 /* Kopf von Unterseiten */
@@ -121,3 +121,12 @@ table.t td:last-child{text-align:right}
 .welcome{padding-top:12vh}
 .welcome .big{font-size:52px;margin-bottom:10px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+.gbar{position:relative;height:10px;border-radius:5px;background:var(--s3);margin:12px 0 0}
+.gbar i{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
+.gbar b{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;background:var(--tx);border-radius:1px}
+[hidden]{display:none!important}
+@keyframes inR{from{transform:translateX(28px);opacity:.4}to{transform:none;opacity:1}}
+@keyframes inL{from{transform:translateX(-28px);opacity:.4}to{transform:none;opacity:1}}
+main.in-right{animation:inR .18s ease-out} main.in-left{animation:inL .18s ease-out}
+@media (prefers-reduced-motion:reduce){main.in-right,main.in-left{animation:none}}
