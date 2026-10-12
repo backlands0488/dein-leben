@@ -126,7 +126,8 @@ table.t td:last-child{text-align:right}
 .gbar i{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
 .gbar b{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;background:var(--tx);border-radius:1px}
 [hidden]{display:none!important}
-@keyframes inR{from{transform:translateX(28px);opacity:.4}to{transform:none;opacity:1}}
-@keyframes inL{from{transform:translateX(-28px);opacity:.4}to{transform:none;opacity:1}}
-main.in-right{animation:inR .18s ease-out} main.in-left{animation:inL .18s ease-out}
-@media (prefers-reduced-motion:reduce){main.in-right,main.in-left{animation:none}}
+body.paged{overflow:hidden;height:100dvh}
+.pager{display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;height:calc(100dvh - env(safe-area-inset-top));scrollbar-width:none;overscroll-behavior-x:contain}
+.pager::-webkit-scrollbar{display:none}
+.page{flex:0 0 100%;width:100%;scroll-snap-align:start;scroll-snap-stop:always;overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:contain}
+.seg{flex-wrap:wrap}

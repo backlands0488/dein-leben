@@ -10,7 +10,9 @@
   const COLORS = ['#9C735B', '#C9A9DD', '#E9E4DA', '#8FB3A0', '#E3B66F', '#7FA6D6', '#E5806F', '#B8C27A'];
 
   let S = load();
-  const ui = { tab: 'heute', stack: [], sheet: null, range: '3M', cal: {} };
+  const ui = { tab: 'heute', stack: [], sheet: null, range: null, cal: {}, metric: {}, scroll: {} };
+  // Standard: 1 Monat, solange der 30-Tage-Ø über 92 kg liegt, sonst 3 Monate
+  const rangeFor = ws => ui.range || (ws.avg !== null && ws.avg <= 92 ? '3M' : '1M');
 
   // ---------- Speicher ----------
   function load() {
@@ -54,14 +56,30 @@
   function render() {
     if (!S) { $app.innerHTML = viewWelcome(); return; }
     const t = top();
+    saveScroll();
     let html;
     if (t) html = `<main>${SCREENS[t.name](t)}</main>`;
-    else html = `<main>${TABS[ui.tab]()}</main>${tabbar()}`;
+    else html = `<div class="pager" id="pager">${TAB_ORDER.map(k => `<section class="page" data-tab="${k}"><main>${TABS[k]()}</main></section>`).join('')}</div>${tabbar()}`;
     if (ui.sheet) html += `<div class="scrim" data-act="closeSheet"><div class="sheet" data-stop>${SHEETS[ui.sheet.name](ui.sheet)}</div></div>`;
+    document.body.classList.toggle('paged', !t);
     $app.innerHTML = html;
+    if (!t) restoreScroll();
     const ps = document.getElementById('persist');
     if (ps && navigator.storage && navigator.storage.persisted) navigator.storage.persisted().then(p => { ps.textContent = p ? 'Dauerhafter Speicher ist aktiv.' : 'Dauerhafter Speicher ist nicht bestätigt. Regelmäßige Backups sind deshalb besonders wichtig.'; });
     else if (ps) ps.textContent = '';
+  }
+  // Seiten nebeneinander mit nativem Scroll-Einrasten: folgt dem Finger, flüssig wie eine native App
+  function saveScroll() {
+    const pg = document.getElementById('pager'); if (!pg) return;
+    pg.querySelectorAll('.page').forEach(p => { ui.scroll[p.dataset.tab] = p.scrollTop; });
+  }
+  function restoreScroll() {
+    const pg = document.getElementById('pager'); if (!pg) return;
+    pg.scrollLeft = TAB_ORDER.indexOf(ui.tab) * pg.clientWidth;
+    pg.querySelectorAll('.page').forEach(p => { p.scrollTop = ui.scroll[p.dataset.tab] || 0; });
+  }
+  function syncTabbar() {
+    document.querySelectorAll('nav.tabs button').forEach(b => { if (b.dataset.arg === ui.tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   }
   function tabbar() {
     const b = (id, ic, l) => `<button data-act="tab" data-arg="${id}" ${ui.tab === id ? 'aria-current="page"' : ''}><span class="ic">${ic}</span>${l}</button>`;
@@ -202,7 +220,8 @@
     const d = today();
     const pauses = S.pauses.filter(p => !p.to || p.to >= d);
     let out = `<h1>Training</h1><p class="sub">${C.trainings(S).filter(s => s.date.startsWith(d.slice(0, 4))).length} Einheiten in ${d.slice(0, 4)}</p>
-      <div class="row" style="margin:0 0 12px"><button class="btn primary grow" data-act="sheet" data-arg="startTraining">Einheit starten</button><button class="btn grow" data-act="newMove">Bewegung eintragen</button></div>`;
+      <div class="row" style="margin:0 0 12px"><button class="btn primary grow" data-act="sheet" data-arg="startTraining">Einheit starten</button><button class="btn grow" data-act="newMove">Bewegung eintragen</button></div>
+      <button class="btn ghost block" style="margin:0 0 12px" data-act="open" data-arg="progress">Leistungsentwicklung</button>`;
     for (const p of pauses) out += `<div class="notice row"><span class="grow">${esc(p.cat)}übungen pausiert seit ${dNum(p.from)}</span><button class="btn sm ghost" data-act="endPause" data-arg="${p.id}">Beenden</button></div>`;
     const list = [...S.sessions].sort((a, b) => (b.date + C.pad(b.num || 0)).localeCompare(a.date + C.pad(a.num || 0)));
     let month = '';
@@ -253,7 +272,7 @@
       <span>${paused ? '<span class="badge pause">pausiert</span> ' : ''}<span class="badge">${esc(ex.cat)}</span></span></div>
       <p class="last">${lastTxt}</p>${body}
       <input type="text" style="margin-top:10px;min-height:40px;font-size:14px" placeholder="Notiz zur Übung" value="${esc(it.note || '')}" data-input="itemNote" data-arg="${s.id}:${idx}">
-      <div class="row" style="justify-content:flex-end;margin-top:8px"><button class="btn sm ghost" data-act="moveItem" data-arg="${s.id}:${idx}:-1" aria-label="Nach oben">↑</button><button class="btn sm ghost" data-act="moveItem" data-arg="${s.id}:${idx}:1" aria-label="Nach unten">↓</button><button class="btn sm danger" data-act="delItem" data-arg="${s.id}:${idx}">Entfernen</button></div></div>`;
+      <div class="row" style="justify-content:flex-end;margin-top:8px">${last ? `<button class="btn sm ghost" style="margin-right:auto" data-act="open" data-arg="exStats:${it.ex}">Verlauf</button>` : ''}<button class="btn sm ghost" data-act="moveItem" data-arg="${s.id}:${idx}:-1" aria-label="Nach oben">↑</button><button class="btn sm ghost" data-act="moveItem" data-arg="${s.id}:${idx}:1" aria-label="Nach unten">↓</button><button class="btn sm danger" data-act="delItem" data-arg="${s.id}:${idx}">Entfernen</button></div></div>`;
   }
   function screenMove({ id }) {
     const m = S.sessions.find(x => x.id === id); if (!m) return header('Nicht gefunden');
@@ -296,6 +315,77 @@
     return out;
   }
 
+  // ===== LEISTUNGSENTWICKLUNG =====
+  const fmtM = (v, unit) => v === undefined || v === null ? '–' : (unit === 'Sek.' && v >= 120 ? `${C.fmtW(Math.round(v / 6) / 10)} Min.` : `${unit === 'kg' && v >= 100 ? Math.round(v).toLocaleString('de-DE') : C.fmtW(Math.round(v * 10) / 10)} ${unit}`);
+  function metricOf(ex) {
+    const list = C.METRICS[ex.type] || []; if (!list.length) return null;
+    return list.find(m => m[0] === ui.metric[ex.id]) || list[0];
+  }
+  function lineChart(pts, { invert = false, color = '#9C735B', W = 400, H = 200, spark = false } = {}) {
+    if (pts.length < 2) return '';
+    const L = spark ? 2 : 34, R = spark ? 2 : 8, Tp = spark ? 3 : 10, B = spark ? 3 : 22;
+    const vals = pts.map(p => p.v); let lo = Math.min(...vals), hi = Math.max(...vals);
+    const pad = (hi - lo) * 0.12 || Math.max(1, Math.abs(hi) * 0.1); lo -= pad; hi += pad;
+    const a = pts[0].d, b = pts[pts.length - 1].d, span = Math.max(1, C.diffDays(a, b));
+    const X = d => L + (W - L - R) * C.diffDays(a, d) / span;
+    const Y = v => { const f = (hi - v) / (hi - lo); return Tp + (H - Tp - B) * (invert ? 1 - f : f); };
+    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${X(p.d).toFixed(1)},${Y(p.v).toFixed(1)}`).join('');
+    if (spark) return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true"><path d="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+    let g = '';
+    const step = niceStep((hi - lo) / 4);
+    for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
+      const lbl = Math.abs(v) >= 1000 ? `${Math.round(v / 100) / 10}k` : (Math.round(v * 10) / 10).toLocaleString('de-DE');
+      g += `<line x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="#2C2930"/><text x="${L - 6}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="#76707A">${lbl}</text>`;
+    }
+    g += [[a, 'start'], [b, 'end']].map(([d, an]) => `<text x="${X(d)}" y="${H - 6}" font-size="11" fill="#76707A" text-anchor="${an}">${dNum(d)}</text>`).join('');
+    const best = invert ? Math.min(...vals) : Math.max(...vals);
+    const dots = pts.map(p => `<circle cx="${X(p.d).toFixed(1)}" cy="${Y(p.v).toFixed(1)}" r="${p.v === best ? 4.5 : 3}" fill="${p.v === best ? '#E3B66F' : color}"/>`).join('');
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Verlauf">${g}<path d="${line}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round"/>${dots}</svg>`;
+  }
+  function niceStep(x) { const p = Math.pow(10, Math.floor(Math.log10(x || 1))); const f = x / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; }
+  function screenProgress() {
+    let out = header('Leistungsentwicklung') + '<p class="muted" style="margin:0 0 4px">Tippe auf eine Übung für den Verlauf.</p>';
+    for (const cat of C.CATS) {
+      const rows = S.exercises.filter(e => e.cat === cat).map(e => ({ e, h: C.exHistory(S, e.id) })).filter(x => x.h.length)
+        .sort((a, b) => b.h[b.h.length - 1].d.localeCompare(a.h[a.h.length - 1].d));
+      if (!rows.length) continue;
+      out += `<h2>${cat}${C.pauseFor(S, cat) ? ' <span class="badge pause">pausiert</span>' : ''}</h2>`;
+      for (const { e, h } of rows) {
+        const m = metricOf(e), pts = m ? h.filter(x => x.v[m[0]] !== undefined).map(x => ({ d: x.d, v: x.v[m[0]] })) : [];
+        const lastV = pts.length ? fmtM(pts[pts.length - 1].v, m[2]) : `${h.length}× erledigt`;
+        out += `<button class="pick" data-act="open" data-arg="exStats:${e.id}"><span class="grow" style="min-width:0"><span style="display:block">${esc(e.name)}</span><span class="faint small">${m ? esc(m[1]) + ': ' : ''}${lastV} · ${h.length} Einheiten</span></span>
+          <span style="flex:0 0 auto;margin-left:10px">${pts.length >= 2 ? lineChart(pts.slice(-20), { invert: !!m[3], W: 84, H: 30, spark: true }) : ''}</span></button>`;
+      }
+    }
+    return out;
+  }
+  function screenExStats({ id }) {
+    const ex = C.exById(S, id); if (!ex) return header('Nicht gefunden');
+    const h = C.exHistory(S, id), m = metricOf(ex), list = C.METRICS[ex.type] || [];
+    let out = header(esc(ex.name)) + `<p class="muted" style="margin:0 0 14px">${esc(ex.cat)} · ${C.TYPES[ex.type]}${ex.uni ? ' · Werte pro Seite' : ''}</p>`;
+    if (!h.length) return out + '<p class="muted">Noch keine Einträge.</p>';
+    if (!m) {
+      return out + `<div class="stats"><div class="stat"><b class="num">${h.length}</b><span>Mal erledigt</span></div><div class="stat"><b class="num" style="font-size:18px">${dNum(h[0].d)}</b><span>Erstes Mal</span></div><div class="stat"><b class="num" style="font-size:18px">${dNum(h[h.length - 1].d)}</b><span>Zuletzt</span></div></div>`;
+    }
+    if (list.length > 1) out += `<div class="seg" style="margin:0 0 12px;flex-wrap:wrap">${list.map(x => `<button aria-pressed="${x[0] === m[0]}" data-act="metric" data-arg="${ex.id}:${x[0]}">${x[1]}</button>`).join('')}</div>`;
+    const pts = h.filter(x => x.v[m[0]] !== undefined).map(x => ({ d: x.d, v: x.v[m[0]] }));
+    if (!pts.length) return out + '<p class="muted">Für diese Kennzahl gibt es noch keine Werte.</p>';
+    const inv = !!m[3], first = pts[0], lastP = pts[pts.length - 1];
+    const bestP = pts.reduce((a, p) => (inv ? p.v < a.v : p.v > a.v) ? p : a, pts[0]);
+    const delta = lastP.v - first.v, better = inv ? delta < 0 : delta > 0;
+    out += `<div class="stats"><div class="stat"><b class="num" style="font-size:20px">${fmtM(lastP.v, m[2])}</b><span>Zuletzt · ${dNum(lastP.d)}</span></div>
+      <div class="stat"><b class="num" style="font-size:20px;color:#E3B66F">${fmtM(bestP.v, m[2])}</b><span>Bestwert · ${dNum(bestP.d)}</span></div>
+      <div class="stat"><b class="num" style="font-size:20px;${delta === 0 ? '' : better ? 'color:var(--sage)' : 'color:var(--danger)'}">${delta > 0 ? '+' : delta < 0 ? '−' : '±'}${fmtM(Math.abs(delta), m[2])}</b><span>Seit ${dNum(first.d)}</span></div></div>`;
+    out += pts.length >= 2 ? lineChart(pts, { invert: inv }) : '<p class="muted">Ab zwei Einträgen erscheint hier der Verlauf.</p>';
+    out += `<p class="faint small">${inv ? 'Achse umgekehrt: weniger Hilfe liegt oben, weil es der Fortschritt ist. ' : ''}${m[0] === 'e1rm' ? 'Geschätztes 1RM nach der Epley-Formel aus dem besten Satz; ab etwa 12 Wiederholungen ungenauer. ' : ''}${m[0] === 'vol' ? 'Volumen = Gewicht × Wiederholungen über alle Sätze. ' : ''}Gelb: Bestwert.</p>`;
+    if (ex.type === 'weight') {
+      const rec = C.repRecords(h);
+      if (rec.length) out += `<h2>Bestwerte je Wiederholungszahl</h2><table class="t num">${rec.map(r => `<tr><td>${r.r} Wdh.</td><td><b>${C.fmtW(r.w)} kg</b> <span class="faint small">${dNum(r.d)}</span></td></tr>`).join('')}</table>`;
+    }
+    out += `<h2>Einheiten</h2><table class="t">${h.slice().reverse().slice(0, 30).map(x => `<tr><td class="num">${dShort(x.d)}</td><td class="small">${esc(C.setSummary(ex, x.sets) || 'erledigt')}${x.note ? `<br><span class="faint">${esc(x.note)}</span>` : ''}</td></tr>`).join('')}</table>`;
+    return out;
+  }
+
   // ===== GEWICHT =====
   function weightTargets(ws) {
     const t = new Set();
@@ -317,7 +407,7 @@
       <div class="card"><div class="row"><input type="text" inputmode="decimal" placeholder="kg" id="wKg" aria-label="Gewicht in kg"><button class="btn primary" data-act="addWeight">Speichern</button></div>
       <details style="margin-top:10px"><summary class="muted small">Für anderen Zeitpunkt eintragen</summary><input type="datetime-local" id="wWhen" style="margin-top:8px" value="${C.nowLocal()}"></details>
       <p class="faint small" style="margin:10px 0 0">${ws.due ? 'Heute fällig.' : `Nächste Messung fällig ${ws.phase === 1 ? 'morgen' : 'ab dem 1. des nächsten Monats'}.`} Für den Durchschnitt zählt die erste Messung eines Tages.</p></div>
-      <div class="row between" style="margin:24px 0 0"><h2 style="margin:0">Verlauf</h2><div class="seg">${['1M', '3M', '6M', '1J'].map(r => `<button aria-pressed="${ui.range === r}" data-act="range" data-arg="${r}">${r}</button>`).join('')}</div></div>
+      <div class="row between" style="margin:24px 0 0"><h2 style="margin:0">Verlauf</h2><div class="seg">${['1M', '3M', '6M', '1J'].map(r => `<button aria-pressed="${rangeFor(ws) === r}" data-act="range" data-arg="${r}">${r}</button>`).join('')}</div></div>
       ${chart(ws, d)}
       <p class="faint small">Punkte: Tageswerte. Linie: 30-Tage-Durchschnitt. Gestrichelt: 99, 92, 88 und 85 kg, soweit im Bild.</p>
       <h2>KFA (Navy)</h2>
@@ -345,7 +435,7 @@
   }
   function chart(ws, d) {
     if (!ws.daily.length) return '<p class="muted">Noch keine Werte.</p>';
-    const from = C.addDays(d, -({ '1M': 30, '3M': 91, '6M': 182, '1J': 365 }[ui.range] || 91));
+    const from = C.addDays(d, -({ '1M': 30, '3M': 91, '6M': 182, '1J': 365 }[rangeFor(ws)] || 30));
     const pts = ws.daily.filter(x => x.d >= from);
     const avg = [];
     const step = 1;
@@ -364,6 +454,7 @@
     for (const ref of [99, 92, 88, 85]) if (ref >= lo && ref <= hi) g += `<line x1="${L}" x2="${W - R}" y1="${Y(ref)}" y2="${Y(ref)}" stroke="#E3B66F" stroke-dasharray="5 5" stroke-width="1.2"/>`;
     // Monatsmarken
     let mk = C.monthStart(C.addDays(from, 31)), lastLabel = -99;
+    if (span <= 31) { for (let k = 0; k <= 4; k++) { const dd = C.addDays(from, Math.round(span * k / 4)); g += `<text x="${X(dd)}" y="${H - 6}" font-size="11" fill="#76707A" text-anchor="${k === 0 ? 'start' : k === 4 ? 'end' : 'middle'}">${Number(dd.slice(8))}.${Number(dd.slice(5, 7))}.</text>`; } mk = '9999'; }
     while (mk <= d) { const x = X(mk); if (x - lastLabel > 46) { g += `<text x="${x}" y="${H - 6}" font-size="11" fill="#76707A" text-anchor="middle">${MONTHS[Number(mk.slice(5, 7)) - 1].slice(0, 3)}${mk.slice(5, 7) === '01' ? ' ' + mk.slice(2, 4) : ''}</text>`; lastLabel = x; } mk = C.monthStart(C.addDays(C.monthEnd(mk), 1)); }
     const dots = pts.map(p => `<circle cx="${X(p.d).toFixed(1)}" cy="${Y(p.kg).toFixed(1)}" r="${pts.length > 150 ? 1.4 : 2.2}" fill="#8FB3A0" fill-opacity=".45"/>`).join('');
     const line = avg.map((a, k) => `${k ? 'L' : 'M'}${X(a.d).toFixed(1)},${Y(a.kg).toFixed(1)}`).join('');
@@ -399,7 +490,7 @@
       <h2>Einstellungen</h2>
       <label class="f"><span>Körpergröße in cm (für die Navy-Methode)</span><input type="text" inputmode="decimal" value="${S.settings.heightCm || ''}" data-change="height"></label>
       <p class="faint small" id="persist">Speicherstatus wird geprüft …</p>
-      <p class="faint small">Dein Leben, Version 2.0.2</p>`;
+      <p class="faint small">Dein Leben, Version 2.1.0</p>`;
   }
   function screenHabits() {
     const row = h => `<button class="pick" data-act="open" data-arg="habit:${h.id}"><span>${esc(h.emoji)} ${esc(h.name)}</span><span class="faint small">${h.archived ? 'archiviert' : ''} ›</span></button>`;
@@ -490,7 +581,7 @@
 
   const TABS = { heute: viewHeute, ziele: viewZiele, training: viewTraining, gewicht: viewGewicht, mehr: viewMehr };
   const TAB_ORDER = ['heute', 'ziele', 'training', 'gewicht', 'mehr'];
-  const SCREENS = { habit: screenHabit, habitEdit: screenHabitEdit, session: screenSession, move: screenMove, exercises: screenExercises, exEdit: screenExEdit, pauses: screenPauses, weights: screenWeights, measure: screenMeasure, habits: screenHabits, goalEdit: screenGoalEdit };
+  const SCREENS = { habit: screenHabit, habitEdit: screenHabitEdit, session: screenSession, move: screenMove, exercises: screenExercises, exEdit: screenExEdit, pauses: screenPauses, weights: screenWeights, measure: screenMeasure, habits: screenHabits, goalEdit: screenGoalEdit, progress: screenProgress, exStats: screenExStats };
 
   // ---------- Sheets ----------
   const SHEETS = {
@@ -541,7 +632,14 @@
   const backupName = () => `dein-leben-backup-${today()}.json`;
 
   const ACTIONS = {
-    tab: a => { ui.tab = a; ui.stack = []; render(); window.scrollTo(0, 0); },
+    tab: a => {
+      const pg = document.getElementById('pager');
+      ui.tab = a;
+      if (ui.stack.length || !pg) { ui.stack = []; render(); return; }
+      ui.jumping = true; clearTimeout(ui.jumpT); ui.jumpT = setTimeout(() => { ui.jumping = false; }, 700);
+      syncTabbar();
+      pg.scrollTo({ left: TAB_ORDER.indexOf(a) * pg.clientWidth, behavior: 'smooth' });
+    },
     goalYear: a => { ui.goalYear = a; render(); },
     saveGoal: a => {
       const [id, y] = a.split(':'); const lock = C.lockState(y, today());
@@ -575,6 +673,7 @@
       if (n === 'habit' || n === 'session' || n === 'move' || n === 'habitEdit') { ui.draftColor = null; push(n, { id: v || null }); }
       else if (n === 'goalEdit') { const [id, y] = v.split(':'); push('goalEdit', { id: id || null, year: y || null }); }
       else if (n === 'exEdit') { const [id, sid] = v.split(':'); push('exEdit', { id: id || null, sessionId: sid || null }); }
+      else if (n === 'exStats') push('exStats', { id: v });
       else push(n); },
     dismiss: a => { S.notices.splice(Number(a), 1); save(); render(); },
     startEmpty: () => { S = C.emptyState(); save(); render(); },
@@ -642,6 +741,7 @@
     addWeight: () => { const w = document.getElementById('wWhen'); const det = w && w.closest('details'); addWeight(document.getElementById('wKg').value, det && det.open && w.value ? w.value : C.nowLocal()); },
     delWeight: a => { const i = a.lastIndexOf(':'); const t = a.slice(0, i), kg = Number(a.slice(i + 1)); if (!confirm(`Eintrag ${C.fmt(kg)} kg vom ${dNum(t)} löschen?`)) return; const k = S.weights.findIndex(w => w.t === t && w.kg === kg); if (k >= 0) S.weights.splice(k, 1); save(); render(); },
     range: a => { ui.range = a; render(); },
+    metric: a => { const i = a.indexOf(':'); ui.metric[a.slice(0, i)] = a.slice(i + 1); render(); },
     saveMeasure: () => {
       const hEl = document.getElementById('mH'); if (hEl) { const hv = C.num(hEl.value); if (!hv) return toast('Gib deine Körpergröße an.'); S.settings.heightCm = hv; }
       const neck = C.num(document.getElementById('mNeck').value), waist = C.num(document.getElementById('mWaist').value);
@@ -710,21 +810,14 @@
   // Wöchentliches Backup beim ersten Tippen (Downloads brauchen eine Nutzeraktion)
   const backupDue = () => S && (!S.lastBackup || C.diffDays(S.lastBackup.slice(0, 10), today()) >= 7);
   document.addEventListener('click', e => { if (backupDue() && !e.target.closest('[data-act=backup],[data-act=shareBackup]')) { download(backupName(), backupText()); toast('Wöchentliches Backup gespeichert (Downloads)'); } }, true);
-  // Wischen zwischen den Hauptseiten; Ränder bleiben für die Zurück-Geste von Android frei
-  let sw = null;
-  document.addEventListener('touchstart', e => {
-    const t = e.touches[0];
-    sw = (e.touches.length === 1 && S && !ui.stack.length && !ui.sheet && t.clientX > 32 && t.clientX < window.innerWidth - 32 && !e.target.closest('input,textarea,select,[data-noswipe]'))
-      ? { x: t.clientX, y: t.clientY, t: Date.now() } : null;
-  }, { passive: true });
-  document.addEventListener('touchend', e => {
-    if (!sw) return; const t = e.changedTouches[0], dx = t.clientX - sw.x, dy = t.clientY - sw.y, dt = Date.now() - sw.t; sw = null;
-    if (dt > 700 || Math.abs(dx) < 70 || Math.abs(dx) < 2 * Math.abs(dy)) return;
-    const i = TAB_ORDER.indexOf(ui.tab), j = i + (dx < 0 ? 1 : -1);
-    if (j < 0 || j >= TAB_ORDER.length) return;
-    ui.tab = TAB_ORDER[j]; render(); window.scrollTo(0, 0);
-    const m = $app.querySelector('main'); if (m) m.classList.add(dx < 0 ? 'in-right' : 'in-left');
-  }, { passive: true });
+  // Aktive Seite aus der Scrollposition ableiten (ohne Neuaufbau)
+  document.addEventListener('scroll', e => {
+    const pg = e.target; if (!pg || pg.id !== 'pager' || ui.jumping) return;
+    const k = TAB_ORDER[Math.round(pg.scrollLeft / pg.clientWidth)];
+    if (k && k !== ui.tab) { ui.tab = k; syncTabbar(); }
+  }, true);
+  document.addEventListener('scrollend', e => { if (e.target && e.target.id === 'pager') { ui.jumping = false; } }, true);
+  window.addEventListener('resize', () => { const pg = document.getElementById('pager'); if (pg && !ui.jumping) pg.scrollLeft = TAB_ORDER.indexOf(ui.tab) * pg.clientWidth; });
 
   document.addEventListener('click', e => {
     const el = e.target.closest('[data-act]');

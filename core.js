@@ -321,15 +321,62 @@
     // weight/assist: nach Gewicht gruppieren
     const groups = [];
     for (const s of sets) { const g = groups[groups.length - 1]; if (g && g.w === s.w) g.r.push(s.r); else groups.push({ w: s.w, r: [s.r] }); }
-    return groups.map(g => `${g.w === null || g.w === undefined ? '? kg' : (ex.type === 'assist' && g.w === 0 ? 'ohne' : fmtW(g.w) + ' kg')} · ${repsText(g.r)}`).join('; ');
+    return groups.map(g => `${g.w === null || g.w === undefined ? '? kg' : (ex.type === 'assist' ? (g.w === 0 ? 'ohne Hilfe' : fmtW(Math.abs(g.w)) + ' kg Hilfe') : fmtW(g.w) + ' kg')} · ${repsText(g.r)}`).join('; ');
   }
+  // ---------- Leistungsentwicklung ----------
+  // [Schlüssel, Bezeichnung, Einheit, weniger ist besser]
+  const METRICS = {
+    weight: [['max', 'Höchstes Gewicht', 'kg'], ['e1rm', 'Geschätztes 1RM', 'kg'], ['vol', 'Volumen', 'kg']],
+    assist: [['assist', 'Geringste Hilfe', 'kg', true], ['reps', 'Wiederholungen gesamt', 'Wdh.']],
+    reps: [['maxr', 'Meiste Wdh. im Satz', 'Wdh.'], ['reps', 'Wiederholungen gesamt', 'Wdh.']],
+    time: [['maxs', 'Längster Satz', 'Sek.'], ['tots', 'Gesamtzeit', 'Sek.']],
+    cardio: [['min', 'Dauer', 'Min.'], ['kmh', 'Tempo', 'km/h']],
+    sled: [['max', 'Höchstes Gewicht', 'kg'], ['m', 'Strecke gesamt', 'm']],
+    done: []
+  };
+  const isNum = x => typeof x === 'number' && !Number.isNaN(x);
+  // Epley-Formel; bei mehr als 12 Wdh. ungenauer
+  const e1rm = (w, r) => r <= 1 ? w : w * (1 + r / 30);
+  function metricValues(ex, sets) {
+    const v = {}, mx = a => a.length ? Math.max(...a) : undefined, sum = a => a.length ? a.reduce((x, y) => x + y, 0) : undefined;
+    const wr = sets.filter(x => isNum(x.w) && isNum(x.r) && x.r > 0);
+    const rs = sets.map(x => x.r).filter(isNum);
+    if (ex.type === 'weight') { if (wr.length) { v.max = mx(wr.map(x => x.w)); v.e1rm = mx(wr.map(x => e1rm(x.w, x.r))); v.vol = sum(wr.map(x => x.w * x.r)); } }
+    else if (ex.type === 'assist') { if (wr.length) v.assist = Math.min(...wr.map(x => Math.abs(x.w))); v.reps = sum(rs); }
+    else if (ex.type === 'reps') { v.maxr = mx(rs); v.reps = sum(rs); }
+    else if (ex.type === 'time') { const t = sets.map(x => x.s).filter(isNum); v.maxs = mx(t); v.tots = sum(t); }
+    else if (ex.type === 'cardio') { v.min = sum(sets.map(x => x.min).filter(isNum)); v.kmh = mx(sets.map(x => x.kmh).filter(isNum)); }
+    else if (ex.type === 'sled') { v.max = mx(sets.map(x => x.w).filter(isNum)); v.m = sum(sets.map(x => x.m).filter(isNum)); }
+    for (const k of Object.keys(v)) if (!isNum(v[k])) delete v[k];
+    return v;
+  }
+  function exHistory(state, exId) {
+    const ex = exById(state, exId); if (!ex) return [];
+    const out = [];
+    for (const s of trainings(state)) for (const it of s.items) {
+      if (it.ex !== exId || !(it.sets.length || it.done || ex.type === 'done')) continue;
+      out.push({ d: s.date, num: s.num, sid: s.id, v: metricValues(ex, it.sets), sets: it.sets, note: it.note || '' });
+    }
+    return out;
+  }
+  // Bestes Gewicht je Wiederholungszahl (nur Gewichtsübungen)
+  function repRecords(hist) {
+    const best = new Map();
+    for (const h of hist) for (const x of h.sets) {
+      if (!isNum(x.w) || !isNum(x.r) || x.r <= 0) continue;
+      const b = best.get(x.r); if (!b || x.w > b.w) best.set(x.r, { r: x.r, w: x.w, d: h.d });
+    }
+    return [...best.values()].sort((a, b) => a.r - b.r);
+  }
+
   function groupRuns(arr) { const out = []; for (const v of arr) { const g = out[out.length - 1]; if (g && g[0] === v) g[1]++; else out.push([v, 1]); } return out; }
   function repsText(r) { r = r.filter(x => x !== null && x !== undefined); if (!r.length) return ''; return r.every(x => x === r[0]) ? `${r.length}×${r[0]}` : r.join('/'); }
 
   const api = {
     pad, iso, parseDay, addDays, diffDays, weekStart, monthStart, monthEnd, yearStart, quarterStart, todayStr, nowLocal, dayRange,
     num, fmt, fmtW, emptyState, validate, PHASES, T, dailyFirst, avg30, weightStatus, thresholds, navyFat, measurementDue,
-    checkedDays, habitStats, targetAt, tempo, forecast, lockState, goalProgress, daysInYear, checkGoals, weekCount, TYPES, CATS, exById, nextNum, trainings, lastItem, pauseFor, setSummary
+    checkedDays, habitStats, targetAt, tempo, forecast, lockState, goalProgress, daysInYear, checkGoals, weekCount, TYPES, CATS, exById, nextNum, trainings, lastItem, pauseFor, setSummary,
+    METRICS, metricValues, exHistory, repRecords
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
 })(typeof self !== 'undefined' ? self : this);
