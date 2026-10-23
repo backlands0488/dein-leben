@@ -9,6 +9,15 @@
   const DAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
   const COLORS = ['#9C735B', '#C9A9DD', '#E9E4DA', '#8FB3A0', '#E3B66F', '#7FA6D6', '#E5806F', '#B8C27A'];
 
+  const INFO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.6v.01" stroke-linecap="round"/></svg>';
+  const CLOCK = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2" stroke-linecap="round"/></svg>';
+  const THEMES = [['light', 'Hell'], ['dim', 'Gedimmt'], ['dark', 'Dunkel']];
+  function applyTheme() {
+    const t = (S && S.settings && S.settings.theme) || 'dark';
+    document.documentElement.dataset.theme = t;
+    const m = document.querySelector('meta[name=theme-color]');
+    if (m) m.content = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  }
   let S = load();
   const ui = { tab: 'heute', stack: [], sheet: null, range: null, cal: {}, metric: {}, scroll: {} };
   // Standard: 1 Monat, solange der 30-Tage-Ø über 92 kg liegt, sonst 3 Monate
@@ -54,6 +63,7 @@
 
   // ---------- Render ----------
   function render() {
+    applyTheme();
     if (!S) { $app.innerHTML = viewWelcome(); return; }
     const t = top();
     saveScroll();
@@ -96,37 +106,34 @@
 
   // ===== HEUTE =====
   function viewHeute() {
-    const d = today();
+    const d = today(), pd = C.parseDay(d);
     const ws = C.weightStatus(S.weights, d);
-    let out = `<h1>${DAYS[C.parseDay(d).getDay()]}</h1><p class="sub">${C.parseDay(d).getDate()}. ${MONTHS[C.parseDay(d).getMonth()]} ${d.slice(0, 4)}</p>`;
+    let out = `<div class="ph"><h1>${DAYS[pd.getDay()]}</h1><span class="meta num">${pd.getDate()}. ${MONTHS[pd.getMonth()]}</span></div>`;
     for (const [i, n] of (S.notices || []).entries()) out += `<div class="notice good row"><span class="grow">${esc(n)}</span><button class="btn sm ghost" data-act="dismiss" data-arg="${i}">OK</button></div>`;
     const running = S.sessions.find(s => s.kind === 'training' && !s.done);
-    if (running) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="session:${running.id}"><span class="grow">Einheit #${C.pad(running.num).padStart(3, '0')} läuft noch</span><b>Fortsetzen</b></button>`;
-    if (ws.due) out += `<div class="notice due"><div class="row between"><span>Wiegen fällig · ${C.PHASES[ws.phase].rhythm}</span></div>
-      <div class="row" style="margin-top:10px"><input type="text" inputmode="decimal" placeholder="kg" id="quickKg" aria-label="Gewicht in kg"><button class="btn primary" data-act="quickWeight">Speichern</button></div></div>`;
-    if (S.settings.heightCm && C.measurementDue(S.measurements, d)) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="measure"><span class="grow">Umfänge messen: neues Quartal</span><b>Messen</b></button>`;
+    if (running) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="session:${running.id}"><span class="grow">Einheit #${String(running.num).padStart(3, '0')} läuft</span><b>›</b></button>`;
+    if (ws.due) out += `<div class="card"><div class="entry"><input type="text" inputmode="decimal" placeholder="Gewicht heute, kg" id="quickKg" aria-label="Gewicht in kg"><button class="btn primary" data-act="quickWeight" aria-label="Gewicht speichern">✓</button></div></div>`;
+    if (S.settings.heightCm && C.measurementDue(S.measurements, d)) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="measure"><span class="grow">Umfänge messen</span><b>›</b></button>`;
     out += goalsMini(d);
     const active = S.habits.filter(h => !h.archived);
-    if (!active.length) out += `<div class="card"><p class="muted" style="margin:0 0 12px">Lege deine erste Gewohnheit an.</p><button class="btn primary" data-act="open" data-arg="habitEdit">Gewohnheit anlegen</button></div>`;
-    out += active.map(habitCard).join('');
+    if (!active.length) out += `<div class="card"><button class="btn primary block" data-act="open" data-arg="habitEdit">Erste Gewohnheit anlegen</button></div>`;
+    else out += `<div class="hlist"><div class="hhead"><span></span><div class="wd">${WD.map(w => `<span class="lbl">${w}</span>`).join('')}</div><span class="lbl">Serie</span></div>${active.map(habitRow).join('')}</div>`;
     return out;
   }
-  function habitCard(h) {
+  function habitRow(h) {
     const d = today(), st = C.habitStats(S, h, d), ws = C.weekStart(d);
     const on = st.days.has(d);
-    const dots = WD.map(w => `<span class="dl">${w}</span>`).join('') + WD.map((_, i) => {
+    const dots = WD.map((_, i) => {
       const day = C.addDays(ws, i); const fut = day > d, before = day < h.start;
       const cls = ['dot', st.days.has(day) ? 'on' : '', day === d ? 'today' : '', fut ? 'future' : '', before ? 'before' : ''].join(' ');
       const dis = fut || before || h.link === 'sport';
       return `<button class="${cls}" ${dis ? 'disabled' : ''} data-act="toggle" data-arg="${h.id}:${day}" aria-label="${day}${st.days.has(day) ? ' erledigt' : ''}"></button>`;
     }).join('');
-    const prog = h.type === 'weekly' ? `${st.week.n}/${st.week.t} diese Woche` : `${on ? 1 : 0}/1 heute`;
-    const streak = h.type === 'weekly' ? `${st.cur} ${st.cur === 1 ? 'Woche' : 'Wochen'} in Folge` : `${st.cur} ${st.cur === 1 ? 'Tag' : 'Tage'} in Folge`;
-    return `<div class="habit" style="--hc:${h.color}">
+    const weekly = h.type === 'weekly';
+    return `<div class="hrow" style="--hc:${h.color}">
       <button class="hab-ico ${on ? 'on' : ''}" data-act="${h.link === 'sport' ? 'sportSheet' : 'toggle'}" data-arg="${h.id}:${d}" aria-label="${esc(h.name)} heute abhaken">${esc(h.emoji)}</button>
-      <div><button class="hab-name" data-act="open" data-arg="habit:${h.id}">${esc(h.name)}</button>
-      <div class="dots">${dots}</div>
-      <div class="hab-meta"><span class="chip">${prog}</span><span class="chip">${streak}</span><span class="chip">🏆 ${st.total}</span></div></div></div>`;
+      <div><button class="hab-name" data-act="open" data-arg="habit:${h.id}">${esc(h.name)}${weekly ? ` <span class="faint num">${st.week.n}/${st.week.t}</span>` : ''}</button><div class="dots">${dots}</div></div>
+      <div class="streak num"><b>${st.cur}</b><span>${weekly ? 'Wo.' : 'Tage'}</span></div></div>`;
   }
 
   // ===== GEWOHNHEIT DETAIL =====
@@ -178,7 +185,7 @@
       for (let i = 0; i < 7; i++) {
         const day = C.addDays(w, i); if (day.slice(0, 4) !== y) continue;
         const on = st.days.has(day);
-        rects += `<rect x="${x * (cell + gap)}" y="${i * (cell + gap)}" width="${cell}" height="${cell}" rx="2.5" fill="${on ? h.color : '#2C2930'}"/>`;
+        rects += `<rect x="${x * (cell + gap)}" y="${i * (cell + gap)}" width="${cell}" height="${cell}" rx="2.5" style="fill:${on ? h.color : 'var(--grid)'}"/>`;
       }
     }
     const W = x * (cell + gap), H = 7 * (cell + gap);
@@ -335,11 +342,11 @@
     const step = niceStep((hi - lo) / 4);
     for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
       const lbl = Math.abs(v) >= 1000 ? `${Math.round(v / 100) / 10}k` : (Math.round(v * 10) / 10).toLocaleString('de-DE');
-      g += `<line x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="#2C2930"/><text x="${L - 6}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="#76707A">${lbl}</text>`;
+      g += `<line x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" style="stroke:var(--grid)"/><text x="${L - 6}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end" font-size="11" style="fill:var(--fa)">${lbl}</text>`;
     }
-    g += [[a, 'start'], [b, 'end']].map(([d, an]) => `<text x="${X(d)}" y="${H - 6}" font-size="11" fill="#76707A" text-anchor="${an}">${dNum(d)}</text>`).join('');
+    g += [[a, 'start'], [b, 'end']].map(([d, an]) => `<text x="${X(d)}" y="${H - 6}" font-size="11" style="fill:var(--fa)" text-anchor="${an}">${dNum(d)}</text>`).join('');
     const best = invert ? Math.min(...vals) : Math.max(...vals);
-    const dots = pts.map(p => `<circle cx="${X(p.d).toFixed(1)}" cy="${Y(p.v).toFixed(1)}" r="${p.v === best ? 4.5 : 3}" fill="${p.v === best ? '#E3B66F' : color}"/>`).join('');
+    const dots = pts.map(p => `<circle cx="${X(p.d).toFixed(1)}" cy="${Y(p.v).toFixed(1)}" r="${p.v === best ? 4.5 : 3}" style="fill:${p.v === best ? 'var(--warn)' : color}"/>`).join('');
     return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Verlauf">${g}<path d="${line}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round"/>${dots}</svg>`;
   }
   function niceStep(x) { const p = Math.pow(10, Math.floor(Math.log10(x || 1))); const f = x / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; }
@@ -374,7 +381,7 @@
     const bestP = pts.reduce((a, p) => (inv ? p.v < a.v : p.v > a.v) ? p : a, pts[0]);
     const delta = lastP.v - first.v, better = inv ? delta < 0 : delta > 0;
     out += `<div class="stats"><div class="stat"><b class="num" style="font-size:20px">${fmtM(lastP.v, m[2])}</b><span>Zuletzt · ${dNum(lastP.d)}</span></div>
-      <div class="stat"><b class="num" style="font-size:20px;color:#E3B66F">${fmtM(bestP.v, m[2])}</b><span>Bestwert · ${dNum(bestP.d)}</span></div>
+      <div class="stat"><b class="num" style="font-size:20px;color:var(--warn)">${fmtM(bestP.v, m[2])}</b><span>Bestwert · ${dNum(bestP.d)}</span></div>
       <div class="stat"><b class="num" style="font-size:20px;${delta === 0 ? '' : better ? 'color:var(--sage)' : 'color:var(--danger)'}">${delta > 0 ? '+' : delta < 0 ? '−' : '±'}${fmtM(Math.abs(delta), m[2])}</b><span>Seit ${dNum(first.d)}</span></div></div>`;
     out += pts.length >= 2 ? lineChart(pts, { invert: inv }) : '<p class="muted">Ab zwei Einträgen erscheint hier der Verlauf.</p>';
     out += `<p class="faint small">${inv ? 'Achse umgekehrt: weniger Hilfe liegt oben, weil es der Fortschritt ist. ' : ''}${m[0] === 'e1rm' ? 'Geschätztes 1RM nach der Epley-Formel aus dem besten Satz; ab etwa 12 Wiederholungen ungenauer. ' : ''}${m[0] === 'vol' ? 'Volumen = Gewicht × Wiederholungen über alle Sätze. ' : ''}Gelb: Bestwert.</p>`;
@@ -395,26 +402,35 @@
     return [...t].filter(k => ws.avg !== null && k < ws.avg).sort((a, b) => b - a);
   }
   function viewGewicht() {
-    const d = today(), ws = C.weightStatus(S.weights, d), th = C.thresholds(ws.phase, ws);
+    const d = today(), ws = C.weightStatus(S.weights, d);
     const ms = [...S.measurements].sort((a, b) => a.t.localeCompare(b.t)), lastNavy = ms[ms.length - 1];
     const tp = C.tempo(ws.daily, d);
-    const fcs = weightTargets(ws).map(k => { const f = C.forecast(ws.avg, tp, k, d); return f && f.date ? `${C.fmt(k)} kg voraussichtlich ${MONTHS[C.parseDay(f.date).getMonth()]} ${f.date.slice(0, 4)}` : null; }).filter(Boolean);
-    let out = `<h1>Gewicht</h1><p class="sub">${C.PHASES[ws.phase].label}: ${C.PHASES[ws.phase].rhythm}</p>
-      <div class="card"><div class="muted small">30-Tage-Durchschnitt</div><div class="big num">${C.fmt(ws.avg)} <span style="font-size:22px">kg</span></div>
-      <p class="num" style="margin:10px 0 0">${tp === null ? '<span class="muted">Tempo: noch zu wenige Werte in den letzten 8 Wochen</span>' : `Tempo: <b>${tp > 0 ? '+' : ''}${C.fmt(tp, 2)} kg/Woche</b> <span class="muted small">(letzte 8 Wochen)</span>`}</p>
-      ${fcs.length ? `<p class="muted small" style="margin:6px 0 0">${fcs.join('<br>')}</p><p class="faint small" style="margin:6px 0 0">Lineare Fortschreibung. Abnehmen wird mit der Zeit meist langsamer.</p>` : (tp !== null && tp >= -0.01 ? '<p class="muted small" style="margin:6px 0 0">Aktuell kein Abwärtstrend, daher keine Prognose.</p>' : '')}
-      <p class="muted small" style="margin:10px 0 0">${[th.down ? 'Weiter: ' + th.down : '', th.up ? 'Zurück: ' + th.up : ''].filter(Boolean).join('<br>')}</p></div>
-      <div class="card"><div class="row"><input type="text" inputmode="decimal" placeholder="kg" id="wKg" aria-label="Gewicht in kg"><button class="btn primary" data-act="addWeight">Speichern</button></div>
-      <details style="margin-top:10px"><summary class="muted small">Für anderen Zeitpunkt eintragen</summary><input type="datetime-local" id="wWhen" style="margin-top:8px" value="${C.nowLocal()}"></details>
-      <p class="faint small" style="margin:10px 0 0">${ws.due ? 'Heute fällig.' : `Nächste Messung fällig ${ws.phase === 1 ? 'morgen' : 'ab dem 1. des nächsten Monats'}.`} Für den Durchschnitt zählt die erste Messung eines Tages.</p></div>
+    const mon = s => `${MONTHS[C.parseDay(s).getMonth()].slice(0, 3)} ${s.slice(2, 4)}`;
+    let track = '';
+    if (ws.phase === 1 && ws.avg !== null) {
+      const sw = [...ws.switches].reverse().find(s => s.to === 1);
+      const a0 = Math.max(C.avg30(ws.daily, sw ? sw.d : ws.daily[0].d), ws.avg);
+      const left = ws.avg - C.T.p1to3, rl = ws.relapse ? Math.max(0, C.T.relapseDays - ws.relapse.n) : 0;
+      const fc = C.forecast(ws.avg, tp, C.T.p1to3, d);
+      const frac = a0 > C.T.p1to3 ? (a0 - ws.avg) / (a0 - C.T.p1to3) : 1;
+      const right = [left > 0 ? `noch ${C.fmt(left)} kg` : '', rl ? `noch ${rl} Wiegetage` : '', left > 0 && fc && fc.date ? `≈ ${mon(fc.date)}` : ''].filter(Boolean).join(' · ') || 'erreicht';
+      track = `<div class="track">${bar(frac, null, 'var(--sage)')}<div class="row between"><span>monatlich ab ${C.fmt(C.T.p1to3)}</span><span class="num">${right}</span></div></div>`;
+    } else if (ws.phase === 3) {
+      const last = ws.daily[ws.daily.length - 1];
+      track = `<div class="track"><div class="row between"><span>Grenze ${C.fmt(C.T.relapse)} kg</span><span class="num">Puffer ${C.fmt(C.T.relapse - last.kg)} kg</span></div></div>`;
+    }
+    const fat = lastNavy && lastNavy.fat !== null && lastNavy.fat !== undefined ? `${C.fmt(lastNavy.fat)} %` : '–';
+    return `<div class="ph"><h1>Gewicht</h1><div class="meta"><span class="pill ${ws.due ? 'due' : ''}">${ws.phase === 1 ? 'täglich' : 'monatlich'}${ws.due ? ' · fällig' : ''}</span><button class="info" data-act="sheet" data-arg="infoWeight" aria-label="Erklärung">${INFO}</button></div></div>
+      <div class="card"><div class="hero"><div><div class="lbl">Ø 30 Tage</div><div class="big num">${C.fmt(ws.avg)}<span>kg</span></div></div>
+      ${tp === null ? '' : `<div class="trend num"><b>${tp > 0 ? '↑' : '↓'} ${C.fmt(Math.abs(tp), 2)}</b>kg / Woche</div>`}</div>${track}</div>
+      <div class="card"><div class="entry"><input type="text" inputmode="decimal" placeholder="kg" id="wKg" aria-label="Gewicht in kg"><button class="iconbtn" data-act="toggleWhen" aria-label="Anderer Zeitpunkt">${CLOCK}</button><button class="btn primary" data-act="addWeight" aria-label="Gewicht speichern">✓</button></div>
+      <input type="datetime-local" id="wWhen" hidden style="margin-top:10px" value="${C.nowLocal()}"></div>
       <div class="row between" style="margin:24px 0 0"><h2 style="margin:0">Verlauf</h2><div class="seg">${['1M', '3M', '6M', '1J'].map(r => `<button aria-pressed="${rangeFor(ws) === r}" data-act="range" data-arg="${r}">${r}</button>`).join('')}</div></div>
       ${chart(ws, d)}
-      <p class="faint small">Punkte: Tageswerte. Linie: 30-Tage-Durchschnitt. Gestrichelt: 99, 92, 88 und 85 kg, soweit im Bild.</p>
-      <h2>KFA (Navy)</h2>
-      <div class="card">${lastNavy ? `<div class="big num">${C.fmt(lastNavy.fat)} <span style="font-size:22px">%</span></div><p class="muted small" style="margin:6px 0 0">Zuletzt gemessen am ${dNum(lastNavy.t)}${lastNavy.neck ? `: Hals ${C.fmt(lastNavy.neck)} cm, Bauch ${C.fmt(lastNavy.waist)} cm` : ''}</p>${kfaChart(ms)}` : '<p class="muted" style="margin:0 0 12px">Noch keine Messung.</p>'}
-      <button class="btn block" style="margin-top:12px" data-act="open" data-arg="measure">Umfänge eintragen</button></div>
-      <h2>Einträge</h2>${weightTable(12)}<button class="btn ghost block" data-act="open" data-arg="weights">Alle ${S.weights.length} Einträge</button>`;
-    return out;
+      <h2>Körperfett</h2>
+      <div class="card"><div class="kfa"><div class="grow"><b class="num">${fat}</b> <span class="faint small num">${lastNavy ? dShort(lastNavy.t) : 'noch nicht gemessen'}</span></div><button class="btn sm" data-act="open" data-arg="measure">Messen</button></div>${kfaChart(ms.filter(m => m.fat !== null && m.fat !== undefined))}</div>
+      <h2>Einträge</h2><div class="wlist num">${[...S.weights].sort((a, b) => b.t.localeCompare(a.t)).slice(0, 5).map(w => `<div class="r"><span>${dShort(w.t)} <span class="faint small">${w.t.slice(11, 16)}</span></span><b>${C.fmt(w.kg)} kg</b></div>`).join('')}</div>
+      <button class="linkbtn" data-act="open" data-arg="weights">Alle ${S.weights.length} Einträge ›</button>`;
   }
   function kfaChart(ms) {
     if (ms.length < 2) return '';
@@ -423,11 +439,11 @@
     const a = ms[0].t.slice(0, 10), b = ms[ms.length - 1].t.slice(0, 10), span = Math.max(1, C.diffDays(a, b));
     const X = t => L + (W - L - R) * C.diffDays(a, t.slice(0, 10)) / span, Y = v => Tp + (H - Tp - B) * (hi - v) / (hi - lo);
     let g = '';
-    for (let v = lo; v <= hi; v += (hi - lo > 6 ? 2 : 1)) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="#2C2930"/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="#76707A">${v}</text>`;
+    for (let v = lo; v <= hi; v += (hi - lo > 6 ? 2 : 1)) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" style="stroke:var(--grid)"/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end" font-size="11" style="fill:var(--fa)">${v}</text>`;
     const line = ms.map((m, i) => `${i ? 'L' : 'M'}${X(m.t).toFixed(1)},${Y(m.fat).toFixed(1)}`).join('');
-    const dots = ms.map(m => `<circle cx="${X(m.t).toFixed(1)}" cy="${Y(m.fat).toFixed(1)}" r="4" fill="#E3B66F"/>`).join('');
-    const lbl = [ms[0], ms[ms.length - 1]].map((m, i) => `<text x="${X(m.t)}" y="${H - 6}" font-size="11" fill="#76707A" text-anchor="${i ? 'end' : 'start'}">${dNum(m.t)}</text>`).join('');
-    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="KFA-Verlauf">${g}<path d="${line}" fill="none" stroke="#E3B66F" stroke-width="2"/>${dots}${lbl}</svg>`;
+    const dots = ms.map(m => `<circle cx="${X(m.t).toFixed(1)}" cy="${Y(m.fat).toFixed(1)}" r="4" style="fill:var(--warn)"/>`).join('');
+    const lbl = [ms[0], ms[ms.length - 1]].map((m, i) => `<text x="${X(m.t)}" y="${H - 6}" font-size="11" style="fill:var(--fa)" text-anchor="${i ? 'end' : 'start'}">${dNum(m.t)}</text>`).join('');
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="KFA-Verlauf">${g}<path d="${line}" fill="none" style="stroke:var(--warn)" stroke-width="2"/>${dots}${lbl}</svg>`;
   }
   function weightTable(n) {
     const list = [...S.weights].sort((a, b) => b.t.localeCompare(a.t)).slice(0, n);
@@ -450,15 +466,15 @@
     const Y = kg => Tp + (H - Tp - B) * (hi - kg) / (hi - lo);
     let g = '';
     const stepY = hi - lo > 20 ? 5 : 2;
-    for (let v = Math.ceil(lo / stepY) * stepY; v <= hi; v += stepY) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="#2C2930"/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="#76707A">${v}</text>`;
-    for (const ref of [99, 92, 88, 85]) if (ref >= lo && ref <= hi) g += `<line x1="${L}" x2="${W - R}" y1="${Y(ref)}" y2="${Y(ref)}" stroke="#E3B66F" stroke-dasharray="5 5" stroke-width="1.2"/>`;
+    for (let v = Math.ceil(lo / stepY) * stepY; v <= hi; v += stepY) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" style="stroke:var(--grid)"/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end" font-size="11" style="fill:var(--fa)">${v}</text>`;
+    for (const ref of [99, 92, 88, 85]) if (ref >= lo && ref <= hi) g += `<line x1="${L}" x2="${W - R}" y1="${Y(ref)}" y2="${Y(ref)}" style="stroke:var(--warn)" stroke-dasharray="4 5" stroke-width="1" stroke-opacity=".8"/><text class="ref" x="${W - R}" y="${Y(ref) - 4}" text-anchor="end" style="fill:var(--warn)">${ref}</text>`;
     // Monatsmarken
     let mk = C.monthStart(C.addDays(from, 31)), lastLabel = -99;
-    if (span <= 31) { for (let k = 0; k <= 4; k++) { const dd = C.addDays(from, Math.round(span * k / 4)); g += `<text x="${X(dd)}" y="${H - 6}" font-size="11" fill="#76707A" text-anchor="${k === 0 ? 'start' : k === 4 ? 'end' : 'middle'}">${Number(dd.slice(8))}.${Number(dd.slice(5, 7))}.</text>`; } mk = '9999'; }
-    while (mk <= d) { const x = X(mk); if (x - lastLabel > 46) { g += `<text x="${x}" y="${H - 6}" font-size="11" fill="#76707A" text-anchor="middle">${MONTHS[Number(mk.slice(5, 7)) - 1].slice(0, 3)}${mk.slice(5, 7) === '01' ? ' ' + mk.slice(2, 4) : ''}</text>`; lastLabel = x; } mk = C.monthStart(C.addDays(C.monthEnd(mk), 1)); }
-    const dots = pts.map(p => `<circle cx="${X(p.d).toFixed(1)}" cy="${Y(p.kg).toFixed(1)}" r="${pts.length > 150 ? 1.4 : 2.2}" fill="#8FB3A0" fill-opacity=".45"/>`).join('');
+    if (span <= 31) { for (let k = 0; k <= 4; k++) { const dd = C.addDays(from, Math.round(span * k / 4)); g += `<text x="${X(dd)}" y="${H - 6}" font-size="11" style="fill:var(--fa)" text-anchor="${k === 0 ? 'start' : k === 4 ? 'end' : 'middle'}">${Number(dd.slice(8))}.${Number(dd.slice(5, 7))}.</text>`; } mk = '9999'; }
+    while (mk <= d) { const x = X(mk); if (x - lastLabel > 46) { g += `<text x="${x}" y="${H - 6}" font-size="11" style="fill:var(--fa)" text-anchor="middle">${MONTHS[Number(mk.slice(5, 7)) - 1].slice(0, 3)}${mk.slice(5, 7) === '01' ? ' ' + mk.slice(2, 4) : ''}</text>`; lastLabel = x; } mk = C.monthStart(C.addDays(C.monthEnd(mk), 1)); }
+    const dots = pts.map(p => `<circle cx="${X(p.d).toFixed(1)}" cy="${Y(p.kg).toFixed(1)}" r="${pts.length > 150 ? 1.4 : 2.2}" style="fill:var(--sage)" fill-opacity=".45"/>`).join('');
     const line = avg.map((a, k) => `${k ? 'L' : 'M'}${X(a.d).toFixed(1)},${Y(a.kg).toFixed(1)}`).join('');
-    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Gewichtsverlauf">${g}${dots}<path d="${line}" fill="none" stroke="#8FB3A0" stroke-width="2.5" stroke-linejoin="round"/></svg>`;
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Gewichtsverlauf">${g}${dots}<path d="${line}" fill="none" style="stroke:var(--sage)" stroke-width="2.5" stroke-linejoin="round"/></svg>`;
   }
   function screenWeights() { return header('Alle Einträge') + weightTable(99999); }
   function screenMeasure() {
@@ -488,6 +504,7 @@
       <button class="pick" data-act="open" data-arg="exercises"><span>Übungen</span><span class="faint">${S.exercises.length} ›</span></button>
       <button class="pick" data-act="open" data-arg="pauses"><span>Pausen</span><span class="faint">${S.pauses.filter(p => !p.to).length} aktiv ›</span></button>
       <h2>Einstellungen</h2>
+      <div class="f" style="margin:0 0 16px"><span class="lbl">Darstellung</span><div class="seg wide" style="margin-top:8px">${THEMES.map(([k, l]) => `<button aria-pressed="${(S.settings.theme || 'dark') === k}" data-act="theme" data-arg="${k}">${l}</button>`).join('')}</div></div>
       <label class="f"><span>Körpergröße in cm (für die Navy-Methode)</span><input type="text" inputmode="decimal" value="${S.settings.heightCm || ''}" data-change="height"></label>
       <p class="faint small" id="persist">Speicherstatus wird geprüft …</p>
       <p class="faint small">Dein Leben, Version 2.1.0</p>`;
@@ -527,7 +544,7 @@
       const frac = p.startAvg !== null && p.startAvg !== g.target ? (p.startAvg - p.value) / (p.startAvg - g.target) : null;
       const sollFrac = p.started ? (C.diffDays(`${g.year}-01-01`, today()) + 1) / C.daysInYear(g.year) : null;
       body = `<div class="big num" style="font-size:34px">${C.fmt(p.value)} <span class="muted" style="font-size:18px">→ ${C.fmt(g.target)} kg</span></div>
-        ${p.started && frac !== null ? bar(frac, sollFrac, '#8FB3A0') : ''}
+        ${p.started && frac !== null ? bar(frac, sollFrac, 'var(--sage)') : ''}
         <p class="muted small" style="margin:8px 0 0">${p.started && p.soll !== null ? `Soll heute: ${C.fmt(p.soll)} kg (Start 01.01.: ${C.fmt(p.startAvg)} kg). ` : `Gilt der 30-Tage-Ø am 31.12.${g.year}. `}${need !== null && need < 0 ? `Nötiges Tempo: ${C.fmt(need, 2)} kg/Woche. ` : ''}${p.tempo !== null && p.tempo !== undefined ? `Aktuell: ${C.fmt(p.tempo, 2)} kg/Woche.` : ''}</p>
         ${fc ? `<p class="faint small" style="margin:4px 0 0">${fc}</p>` : ''}`;
     }
@@ -552,9 +569,14 @@
     const y = d.slice(0, 4), cur = S.goals.filter(g => String(g.year) === y);
     if (cur.length) {
       const rows = cur.map(g => { const p = C.goalProgress(S, g, d);
-        const txt = g.type === 'weight' ? `${C.fmt(p.value)} → ${C.fmt(g.target)} kg` : `${p.value} / ${g.target}${g.type === 'trainings' ? ` (Soll ${Math.round(p.soll)})` : ''}`;
-        return `<div class="row between small" style="padding:4px 0"><span class="grow">${esc(g.title)}</span><b class="num">${txt}</b></div>`; }).join('');
-      return `<button class="card" style="width:100%;border:0;text-align:left;display:block" data-act="tab" data-arg="ziele"><div class="muted small" style="margin:0 0 6px">Ziele ${y}</div>${rows}</button>`;
+        let txt, frac, soll = null;
+        if (g.type === 'weight') {
+          txt = `${C.fmt(p.value)} / ${C.fmt(g.target)} kg`;
+          frac = p.startAvg !== null && p.startAvg > g.target ? (p.startAvg - p.value) / (p.startAvg - g.target) : (p.value <= g.target ? 1 : 0);
+          if (p.soll !== null && p.startAvg > g.target) soll = (p.startAvg - p.soll) / (p.startAvg - g.target);
+        } else { txt = `${p.value} / ${g.target}`; frac = p.value / g.target; if (p.soll !== undefined) soll = Math.min(1, p.soll / g.target); }
+        return `<div class="gmini"><span>${esc(g.title)}</span><b class="num small">${txt}</b>${bar(frac, soll, 'var(--sage)')}</div>`; }).join('');
+      return `<button class="card" style="width:100%;border:0;text-align:left;display:block" data-act="tab" data-arg="ziele"><div class="lbl" style="margin:0 0 4px">Ziele ${y}</div>${rows}</button>`;
     }
     const ny = String(Number(y) + 1), next = S.goals.filter(g => String(g.year) === ny), lk = C.lockState(ny, d);
     return `<button class="notice row" style="width:100%;border:0;text-align:left" data-act="tab" data-arg="ziele"><span class="grow">Ziele ${ny}: ${next.length} von 3 festgelegt · ${lk.label.toLowerCase()}</span><b>›</b></button>`;
@@ -585,6 +607,18 @@
 
   // ---------- Sheets ----------
   const SHEETS = {
+    infoWeight: () => {
+      const d = today(), ws = C.weightStatus(S.weights, d), th = C.thresholds(ws.phase, ws), tp = C.tempo(ws.daily, d);
+      const fcs = weightTargets(ws).map(k => { const f = C.forecast(ws.avg, tp, k, d); return f && f.date ? `${C.fmt(k)} kg voraussichtlich ${MONTHS[C.parseDay(f.date).getMonth()]} ${f.date.slice(0, 4)}` : null; }).filter(Boolean);
+      return `<h3>So rechnet diese Seite</h3><div class="ex-txt">
+        <p><b>Ø 30 Tage:</b> Durchschnitt der letzten 30 Tage. Pro Tag zählt nur die erste Messung.</p>
+        <p><b>Phasen:</b> ${[th.down ? 'Weiter: ' + th.down : '', th.up ? 'Zurück: ' + th.up : ''].filter(Boolean).join('<br>')}</p>
+        <p><b>Tempo und Prognose:</b> Trend der Tageswerte der letzten 8 Wochen, linear fortgeschrieben. Abnehmen wird mit der Zeit meist langsamer.${fcs.length ? '<br>' + fcs.join('<br>') : ''}</p>
+        <p><b>Diagramm:</b> Punkte sind Tageswerte, die Linie ist der 30-Tage-Ø, gestrichelt deine Marken 99, 92, 88 und 85 kg.</p>
+        <p><b>Körperfett:</b> Navy-Methode aus Hals- und Bauchumfang, einmal pro Quartal.</p>
+        <p><b>Einträge löschen:</b> unter „Alle Einträge“.</p></div>
+        <button class="btn block" data-act="closeSheet">Verstanden</button>`;
+    },
     sport: ({ date }) => `<h3>Sport am ${dNum(date)}</h3>
       <button class="btn primary block" data-act="startTraining" data-arg="repeat:${date}">Letzte Einheit wiederholen</button>
       <button class="btn block" data-act="startTraining" data-arg="empty:${date}">Leer starten</button>
@@ -738,7 +772,9 @@
     endPause: a => { const p = S.pauses.find(x => x.id === a); p.to = C.addDays(today(), -1) < p.from ? today() : C.addDays(today(), -1); save(); render(); toast(`${p.cat}übungen wieder aktiv`); },
     addPause: () => { const cat = document.getElementById('pCat').value; if (C.pauseFor(S, cat)) return toast(`${cat} ist schon pausiert.`); S.pauses.push({ id: uid('p'), cat, from: today(), to: null }); save(); render(); },
     quickWeight: () => addWeight(document.getElementById('quickKg').value, C.nowLocal()),
-    addWeight: () => { const w = document.getElementById('wWhen'); const det = w && w.closest('details'); addWeight(document.getElementById('wKg').value, det && det.open && w.value ? w.value : C.nowLocal()); },
+    addWeight: () => { const w = document.getElementById('wWhen'); addWeight(document.getElementById('wKg').value, w && !w.hidden && w.value ? w.value : C.nowLocal()); },
+    toggleWhen: () => { const w = document.getElementById('wWhen'); if (w) w.hidden = !w.hidden; },
+    theme: a => { S.settings.theme = a; save(); render(); },
     delWeight: a => { const i = a.lastIndexOf(':'); const t = a.slice(0, i), kg = Number(a.slice(i + 1)); if (!confirm(`Eintrag ${C.fmt(kg)} kg vom ${dNum(t)} löschen?`)) return; const k = S.weights.findIndex(w => w.t === t && w.kg === kg); if (k >= 0) S.weights.splice(k, 1); save(); render(); },
     range: a => { ui.range = a; render(); },
     metric: a => { const i = a.indexOf(':'); ui.metric[a.slice(0, i)] = a.slice(i + 1); render(); },
