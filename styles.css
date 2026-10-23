@@ -325,3 +325,16 @@ input[type=text],input[type=number],input[type=date],input[type=datetime-local],
 .seg button{min-height:44px;min-width:48px}
 .seg.wide button{min-height:44px}
 .linkbtn{min-height:48px}
+
+/* ---------- 2.3: Wochenring, Übungen, Anpassen ---------- */
+.hero-b .hero-sub:first-child{text-transform:uppercase;letter-spacing:.06em;font-size:var(--f-xs);font-weight:600;opacity:.75}
+.trio{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.trio .tilebtn.act{min-height:118px;padding:12px}
+.trio .tilebtn.act .faint{font-size:var(--f-xs)}
+.card.accents{margin:12px 0}
+.card.accents .swatches{margin-top:12px;gap:12px}
+.card.accents .swatch{width:44px;height:44px;border-width:3px;box-shadow:inset 0 0 0 3px var(--s1)}
+.card.accents .swatch[aria-pressed=true]{border-color:var(--tx)}
+.srow .iconbtn.sm{flex:none}
+.card.accents .swatch{display:grid;place-items:center;padding:0;color:#10140F}
+.card.accents .swatch[aria-pressed=true]{box-shadow:none;border-color:transparent}

@@ -22,14 +22,34 @@
     mehr: '<circle cx="6" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18" cy="12" r="1.3"/>'
   };
   const THEMES = [['light', 'Hell'], ['dim', 'Gedimmt'], ['dark', 'Dunkel']];
+  // Akzentfarben je Farbschema: [Akzent, Schrift auf Akzent, Fläche, Schrift auf Fläche]. Minze = Standard aus styles.css
+  const ACCENTS = {
+    mint: ['Minze', '#86D7C0', null],
+    blau: ['Blau', '#8EC5FF', { dark: ['#8EC5FF', '#00325A', '#16324C', '#CDE5FF'], dim: ['#9CCBFF', '#00325A', '#2E4A63', '#D6EAFF'], light: ['#1F5FA8', '#FFFFFF', '#D3E4FF', '#001C3A'] }],
+    violett: ['Violett', '#C9B3FF', { dark: ['#C9B3FF', '#2E1A63', '#30264F', '#E6DEFF'], dim: ['#CFBCFF', '#2E1A63', '#4A3E6B', '#EBE3FF'], light: ['#6A4FB3', '#FFFFFF', '#E6DEFF', '#22104F'] }],
+    rose: ['Rosé', '#F4A8CF', { dark: ['#F4A8CF', '#5B1140', '#4A2440', '#FFD8EA'], dim: ['#F6B3D5', '#5B1140', '#63405A', '#FFE0EF'], light: ['#A2386F', '#FFFFFF', '#FFD8EA', '#3A0024'] }],
+    limette: ['Limette', '#C3DC72', { dark: ['#C3DC72', '#2C3A00', '#33401A', '#E1F5A6'], dim: ['#CBE17F', '#2C3A00', '#4C5A30', '#E7F8B4'], light: ['#4F6A00', '#FFFFFF', '#D9EDA0', '#162000'] }],
+    graphit: ['Graphit', '#E1E8E5', { dark: ['#E1E8E5', '#18201E', '#2D3734', '#E1E8E5'], dim: ['#E4ECE9', '#252D2B', '#4A5552', '#E4ECE9'], light: ['#2A3330', '#FFFFFF', '#DCE5E2', '#0F1C19'] }]
+  };
+  const TAB_LABELS = { heute: 'Heute', ziele: 'Ziele', training: 'Training', gewicht: 'Gewicht', mehr: 'Mehr' };
+  const TAB_DEFAULT = ['heute', 'ziele', 'training', 'gewicht', 'mehr'];
+  // Gespeicherte Reihenfolge nur übernehmen, wenn sie genau die fünf Seiten enthält
+  function tabOrder() {
+    const o = S && S.settings && S.settings.tabOrder;
+    return Array.isArray(o) && o.length === TAB_DEFAULT.length && TAB_DEFAULT.every(k => o.includes(k)) ? o : TAB_DEFAULT;
+  }
   function applyTheme() {
     const t = (S && S.settings && S.settings.theme) || 'dark';
     document.documentElement.dataset.theme = t;
+    const ac = ACCENTS[S && S.settings && S.settings.accent], st = document.documentElement.style;
+    const props = ['--accent', '--on-accent', '--pc', '--on-pc', '--sage', '--good-bg', '--good-tx'];
+    if (!ac || !ac[2]) props.forEach(p => st.removeProperty(p));
+    else { const [a, oa, pc, opc] = ac[2][t]; [a, oa, pc, opc, a, pc, opc].forEach((v, i) => st.setProperty(props[i], v)); }
     const m = document.querySelector('meta[name=theme-color]');
     if (m) m.content = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
   }
   let S = load();
-  const ui = { tab: 'heute', stack: [], sheet: null, range: null, cal: {}, metric: {}, scroll: {} };
+  const ui = { tab: tabOrder()[0], stack: [], sheet: null, range: null, cal: {}, metric: {}, scroll: {} };
   // Standard: 1 Monat, solange der 30-Tage-Ø über 92 kg liegt, sonst 3 Monate
   const rangeFor = ws => ui.range || (ws.avg !== null && ws.avg <= 92 ? '3M' : '1M');
 
@@ -79,7 +99,7 @@
     saveScroll();
     let html;
     if (t) html = `<main>${SCREENS[t.name](t)}</main>`;
-    else html = `<div class="pager" id="pager">${TAB_ORDER.map(k => `<section class="page" data-tab="${k}"><main>${TABS[k]()}</main></section>`).join('')}</div>${tabbar()}`;
+    else html = `<div class="pager" id="pager">${tabOrder().map(k => `<section class="page" data-tab="${k}"><main>${TABS[k]()}</main></section>`).join('')}</div>${tabbar()}`;
     if (ui.sheet) html += `<div class="scrim" data-act="closeSheet"><div class="sheet" data-stop>${SHEETS[ui.sheet.name](ui.sheet)}</div></div>`;
     document.body.classList.toggle('paged', !t);
     $app.innerHTML = html;
@@ -95,7 +115,7 @@
   }
   function restoreScroll() {
     const pg = document.getElementById('pager'); if (!pg) return;
-    pg.scrollLeft = TAB_ORDER.indexOf(ui.tab) * pg.clientWidth;
+    pg.scrollLeft = tabOrder().indexOf(ui.tab) * pg.clientWidth;
     pg.querySelectorAll('.page').forEach(p => { p.scrollTop = ui.scroll[p.dataset.tab] || 0; });
   }
   function syncTabbar() {
@@ -103,7 +123,7 @@
   }
   function tabbar() {
     const b = (id, ic, l) => `<button data-act="tab" data-arg="${id}" ${ui.tab === id ? 'aria-current="page"' : ''}><span class="ic"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[id]}</svg></span>${l}</button>`;
-    return `<nav class="tabs">${b('heute', '◎', 'Heute')}${b('ziele', '◇', 'Ziele')}${b('training', '▤', 'Training')}${b('gewicht', '◢', 'Gewicht')}${b('mehr', '⋯', 'Mehr')}</nav>`;
+    return `<nav class="tabs">${tabOrder().map(k => b(k, '', TAB_LABELS[k])).join('')}</nav>`;
   }
 
   function viewWelcome() {
@@ -151,13 +171,37 @@
     for (const [i, n] of (S.notices || []).entries()) out += `<div class="notice good row"><span class="grow">${esc(n)}</span><button class="btn sm ghost" data-act="dismiss" data-arg="${i}">OK</button></div>`;
     const running = S.sessions.find(s => s.kind === 'training' && !s.done);
     if (running) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="session:${running.id}"><span class="grow">Einheit #${String(running.num).padStart(3, '0')} läuft</span><b>›</b></button>`;
-    if (active.length) out += `<div class="hero-b">${ring(done / active.length, 64, 8, 'var(--accent)', done === active.length ? CHECK : '')}<div><div class="hero-num num">${done} von ${active.length}</div><div class="hero-sub">heute erledigt</div></div></div>`;
+    if (active.length) {
+      const wk = weekProgress(active, stats, d), frac = wk.P ? wk.D / wk.P : 0;
+      const inner = wk.P && wk.D >= wk.P ? CHECK : `<b class="num" style="font-size:18px">${Math.round(frac * 100)}%</b>`;
+      out += `<div class="hero-b">${ring(frac, 76, 9, 'var(--accent)', inner, wk.P ? wk.E / wk.P : null)}
+        <div><div class="hero-sub">Diese Woche</div><div class="hero-num num">${wk.D} von ${wk.P}</div><div class="hero-sub num">heute ${done} von ${active.length}</div></div></div>`;
+    }
     if (ws.due) out += `<div class="entry-b"><input type="text" inputmode="decimal" placeholder="Gewicht heute, kg" id="quickKg" aria-label="Gewicht in kg"><button class="fab" data-act="quickWeight" aria-label="Gewicht speichern">${CHECK}</button></div>`;
     if (S.settings.heightCm && C.measurementDue(S.measurements, d)) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="measure"><span class="grow">Umfänge messen</span><b>›</b></button>`;
-    out += goalsMini(d);
     if (!active.length) out += `<div class="card"><button class="btn primary block" data-act="open" data-arg="habitEdit">Erste Gewohnheit anlegen</button></div>`;
     else out += `<div class="tiles">${active.map((h, i) => habitTile(h, stats[i], d)).join('')}</div>`;
     return out;
+  }
+  // Wochenring: alle Abhak-Möglichkeiten von Mo bis So.
+  // Täglich (auch Verzicht): jeder Tag ab Beginn ist eine Möglichkeit. X-mal pro Woche: das Wochenziel, Mehrleistung zählt nicht doppelt.
+  // E = Soll bis einschließlich heute (Strich im Ring).
+  function weekProgress(active, stats, d) {
+    const ws = C.weekStart(d), we = C.addDays(ws, 6), elapsed = C.diffDays(ws, d) + 1;
+    let P = 0, D = 0, E = 0;
+    active.forEach((h, i) => {
+      const days = stats[i].days;
+      if (h.start > we) return;
+      if (h.type === 'weekly') {
+        const t = C.targetAt(h, ws);
+        P += t; D += Math.min(t, C.weekCount(days, ws)); E += t * elapsed / 7;
+      } else {
+        const from = h.start > ws ? h.start : ws;
+        P += C.diffDays(from, we) + 1;
+        if (from <= d) { for (const day of C.dayRange(from, d)) if (days.has(day)) D++; E += C.diffDays(from, d) + 1; }
+      }
+    });
+    return { P, D, E };
   }
   function habitTile(h, st, d) {
     const ws = C.weekStart(d), on = st.days.has(d), weekly = h.type === 'weekly';
@@ -261,8 +305,9 @@
     const nEx = S.exercises.filter(e => C.exHistory(S, e.id).length).length;
     let out = `<div class="ph"><h1>Training</h1><div class="meta"><span class="pill num">${C.trainings(S).filter(s => s.date.startsWith(y)).length} in ${y}</span></div></div>
       <button class="btn primary block xl" data-act="sheet" data-arg="startTraining">Einheit starten</button>
-      <div class="duo" style="margin:10px 0 0"><button class="card tilebtn act" data-act="newMove"><span class="tile-emo" style="--hc:var(--sage)">🚶</span><b>Bewegung</b><span class="faint small">eintragen</span></button>
-      <button class="card tilebtn act" data-act="open" data-arg="progress"><span class="tile-emo" style="--hc:var(--umber)">📈</span><b>Fortschritt</b><span class="faint small num">${nEx} Übungen</span></button></div>`;
+      <div class="trio" style="margin:10px 0 0"><button class="card tilebtn act" data-act="newMove"><span class="tile-emo" style="--hc:var(--sage)">🚶</span><b>Bewegung</b><span class="faint small">eintragen</span></button>
+      <button class="card tilebtn act" data-act="open" data-arg="progress"><span class="tile-emo" style="--hc:var(--umber)">📈</span><b>Fortschritt</b><span class="faint small num">${nEx} mit Verlauf</span></button>
+      <button class="card tilebtn act" data-act="open" data-arg="exercises"><span class="tile-emo" style="--hc:#7FA6D6">🏋️</span><b>Übungen</b><span class="faint small num">${S.exercises.length} · neu</span></button></div>`;
     for (const p of pauses) out += `<div class="notice row"><span class="grow">${esc(p.cat)} pausiert seit ${dNum(p.from).slice(0, 6)}</span><button class="btn sm ghost" data-act="endPause" data-arg="${p.id}">Beenden</button></div>`;
     const list = [...S.sessions].sort((a, b) => (b.date + C.pad(b.num || 0)).localeCompare(a.date + C.pad(a.num || 0)));
     let month = '', rows = '';
@@ -330,7 +375,7 @@
       <button class="btn danger block" data-act="deleteSession" data-arg="${m.id}">Löschen</button>`;
   }
   function screenExercises() {
-    let out = header('Übungen', `<button class="btn sm ghost" data-act="open" data-arg="exEdit">Neu</button>`);
+    let out = header('Übungen') + `<button class="btn primary block xl" data-act="open" data-arg="exEdit">Neue Übung anlegen</button>`;
     for (const cat of C.CATS) {
       const list = S.exercises.filter(e => e.cat === cat).sort((a, b) => a.name.localeCompare(b.name, 'de'));
       if (!list.length) continue;
@@ -516,6 +561,7 @@
     const ago = S.lastBackup ? C.diffDays(S.lastBackup.slice(0, 10), today()) : null;
     const agoTxt = ago === null ? 'noch nie' : ago === 0 ? 'heute' : ago === 1 ? 'gestern' : `vor ${ago} Tagen`;
     const row = (arg, l, v) => `<button class="srow" data-act="open" data-arg="${arg}"><span class="grow"><b>${l}</b></span><span class="muted num">${v}</span><span class="chev">›</span></button>`;
+    const acc = ACCENTS[S.settings.accent] ? S.settings.accent : 'mint';
     return `<div class="ph"><h1>Mehr</h1></div>
       <div class="card"><div class="row between"><span class="lbl">Backup</span>${infoBtn('backup')}</div>
       <div class="hero-num num" style="margin:2px 0 14px">${agoTxt}${S.lastBackup ? ` <span class="faint small" style="font-weight:500">${dNum(S.lastBackup)}</span>` : ''}</div>
@@ -525,10 +571,23 @@
       <div class="wlist">${row('habits', 'Gewohnheiten', S.habits.length)}${row('exercises', 'Übungen', S.exercises.length)}${row('pauses', 'Pausen', `${S.pauses.filter(p => !p.to).length} aktiv`)}</div>
       <div class="lbl mon">Darstellung</div>
       <div class="seg wide">${THEMES.map(([k, l]) => `<button aria-pressed="${(S.settings.theme || 'dark') === k}" data-act="theme" data-arg="${k}">${l}</button>`).join('')}</div>
+      <div class="card accents"><div class="row between"><span class="lbl">Akzentfarbe</span><span class="muted small">${ACCENTS[acc][0]}</span></div>
+      <div class="swatches">${Object.entries(ACCENTS).map(([k, v]) => `<button class="swatch" style="background:${v[1]}" aria-pressed="${k === acc}" data-act="accent" data-arg="${k}" aria-label="Akzentfarbe ${v[0]}">${k === acc ? CHECK : ''}</button>`).join('')}</div></div>
+      <div class="wlist">${row('tabOrder', 'Reihenfolge der Seiten', `Start: ${TAB_LABELS[tabOrder()[0]]}`)}</div>
       <div class="lbl mon">Körpergröße</div>
       <div class="entry-b"><input type="text" inputmode="decimal" value="${S.settings.heightCm || ''}" data-change="height" aria-label="Körpergröße in cm" placeholder="cm"><span class="muted" style="margin-right:8px">cm</span></div>
       <p class="faint small" id="persist" style="margin:18px 0 4px">…</p>
-      <p class="faint small" style="margin:0">Dein Leben 2.2.0</p>`;
+      <p class="faint small" style="margin:0">Dein Leben 2.3.0</p>`;
+  }
+  function screenTabOrder() {
+    const o = tabOrder(), last = o.length - 1;
+    const ic = k => `<span class="sn"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg></span>`;
+    return `${header('Reihenfolge der Seiten')}
+      <div class="wlist">${o.map((k, i) => `<div class="srow"><span class="faint num" style="width:14px">${i + 1}</span>${ic(k)}<span class="grow"><b>${TAB_LABELS[k]}</b>${i === 0 ? ' <span class="pill">Start</span>' : ''}</span>
+        <button class="iconbtn sm" data-act="moveTab" data-arg="${i}:-1" aria-label="${TAB_LABELS[k]} nach oben" ${i === 0 ? 'disabled' : ''}>↑</button>
+        <button class="iconbtn sm" data-act="moveTab" data-arg="${i}:1" aria-label="${TAB_LABELS[k]} nach unten" ${i === last ? 'disabled' : ''}>↓</button></div>`).join('')}</div>
+      <p class="faint small" style="margin:12px 4px">Die oberste Seite öffnet sich beim Start. Wischen folgt derselben Reihenfolge.</p>
+      <button class="btn ghost block" data-act="resetTabs" ${o === TAB_DEFAULT ? 'disabled' : ''}>Zurücksetzen</button>`;
   }
   function screenHabits() {
     const row = h => `<button class="pick" data-act="open" data-arg="habit:${h.id}"><span>${esc(h.emoji)} ${esc(h.name)}</span><span class="faint small">${h.archived ? 'archiviert' : ''} ›</span></button>`;
@@ -540,10 +599,6 @@
   const GTYPES = { habit: 'Gewohnheit: Tage im Jahr', trainings: 'Trainingseinheiten (Studio)', weight: 'Gewicht: 30-Tage-Ø am 31.12.' };
   function goalYears() { const y = Number(today().slice(0, 4)); return [String(y), String(y + 1)]; }
   function defaultGoalYear() { const [a, b] = goalYears(); return S.goals.some(g => String(g.year) === a) ? a : b; }
-  function bar(frac, sollFrac, color) {
-    const f = Math.max(0, Math.min(1, frac || 0)), sf = sollFrac === null || sollFrac === undefined ? null : Math.max(0, Math.min(1, sollFrac));
-    return `<div class="gbar"><i style="width:${(f * 100).toFixed(1)}%;background:${color}"></i>${sf !== null ? `<b style="left:${(sf * 100).toFixed(1)}%" title="Soll"></b>` : ''}</div>`;
-  }
   function lockShort(lock) {
     if (lock.editable) return lock.needsReason ? 'Fenster bis 30.06.' : `offen bis ${lock.until.split('-').reverse().slice(0, 2).join('.')}.`;
     return `🔒 bis ${lock.next ? lock.next.split('-').reverse().slice(0, 2).join('.') + '.' : '31.12.'}`;
@@ -589,22 +644,6 @@
     if (log.length) out += `<div class="lbl mon">Änderungen</div><div class="wlist">` + log.map(l => `<div class="r" style="display:block"><b class="num">${dNum(l.t)}</b> <span class="muted small">${{ add: 'hinzugefügt', edit: 'geändert', delete: 'gelöscht' }[l.action]}: ${esc(l.title)}</span>${l.reason ? `<div class="faint small">${esc(l.reason)}</div>` : ''}</div>`).join('') + '</div>';
     return out;
   }
-  function goalsMini(d) {
-    const y = d.slice(0, 4), cur = S.goals.filter(g => String(g.year) === y);
-    if (cur.length) {
-      const rows = cur.map(g => { const p = C.goalProgress(S, g, d);
-        let txt, frac, soll = null;
-        if (g.type === 'weight') {
-          txt = `${C.fmt(p.value)} / ${C.fmt(g.target)} kg`;
-          frac = p.startAvg !== null && p.startAvg > g.target ? (p.startAvg - p.value) / (p.startAvg - g.target) : (p.value <= g.target ? 1 : 0);
-          if (p.soll !== null && p.startAvg > g.target) soll = (p.startAvg - p.soll) / (p.startAvg - g.target);
-        } else { txt = `${p.value} / ${g.target}`; frac = p.value / g.target; if (p.soll !== undefined) soll = Math.min(1, p.soll / g.target); }
-        return `<div class="gmini"><span>${esc(g.title)}</span><b class="num small">${txt}</b>${bar(frac, soll, 'var(--sage)')}</div>`; }).join('');
-      return `<button class="card" style="width:100%;border:0;text-align:left;display:block" data-act="tab" data-arg="ziele"><div class="lbl" style="margin:0 0 4px">Ziele ${y}</div>${rows}</button>`;
-    }
-    const ny = String(Number(y) + 1), next = S.goals.filter(g => String(g.year) === ny), lk = C.lockState(ny, d);
-    return `<button class="notice row" style="width:100%;border:0;text-align:left" data-act="tab" data-arg="ziele"><span class="grow">Ziele ${ny}: ${next.length} von 3 festgelegt · ${lk.label.toLowerCase()}</span><b>›</b></button>`;
-  }
   function screenGoalEdit({ id, year }) {
     const g = id ? S.goals.find(x => x.id === id) : null;
     const y = g ? String(g.year) : year, lock = C.lockState(y, today());
@@ -626,8 +665,7 @@
   function logGoal(year, action, title, reason) { S.goalLog.push({ t: C.nowLocal(), year: String(year), action, title, reason: reason || '' }); }
 
   const TABS = { heute: viewHeute, ziele: viewZiele, training: viewTraining, gewicht: viewGewicht, mehr: viewMehr };
-  const TAB_ORDER = ['heute', 'ziele', 'training', 'gewicht', 'mehr'];
-  const SCREENS = { habit: screenHabit, habitEdit: screenHabitEdit, session: screenSession, move: screenMove, exercises: screenExercises, exEdit: screenExEdit, pauses: screenPauses, weights: screenWeights, measure: screenMeasure, habits: screenHabits, goalEdit: screenGoalEdit, progress: screenProgress, exStats: screenExStats };
+  const SCREENS = { tabOrder: screenTabOrder, habit: screenHabit, habitEdit: screenHabitEdit, session: screenSession, move: screenMove, exercises: screenExercises, exEdit: screenExEdit, pauses: screenPauses, weights: screenWeights, measure: screenMeasure, habits: screenHabits, goalEdit: screenGoalEdit, progress: screenProgress, exStats: screenExStats };
 
   // ---------- Sheets ----------
   const INFOS = {
@@ -710,7 +748,7 @@
       if (ui.stack.length || !pg) { ui.stack = []; render(); return; }
       ui.jumping = true; clearTimeout(ui.jumpT); ui.jumpT = setTimeout(() => { ui.jumping = false; }, 700);
       syncTabbar();
-      pg.scrollTo({ left: TAB_ORDER.indexOf(a) * pg.clientWidth, behavior: 'smooth' });
+      pg.scrollTo({ left: tabOrder().indexOf(a) * pg.clientWidth, behavior: 'smooth' });
     },
     goalYear: a => { ui.goalYear = a; render(); },
     saveGoal: a => {
@@ -813,6 +851,13 @@
     addWeight: () => { const w = document.getElementById('wWhen'); addWeight(document.getElementById('wKg').value, w && !w.hidden && w.value ? w.value : C.nowLocal()); },
     toggleWhen: () => { const w = document.getElementById('wWhen'); if (w) w.hidden = !w.hidden; },
     theme: a => { S.settings.theme = a; save(); render(); },
+    accent: a => { if (!ACCENTS[a]) return; S.settings.accent = a; save(); render(); },
+    moveTab: a => {
+      const [i, dir] = a.split(':').map(Number), o = [...tabOrder()], j = i + dir;
+      if (j < 0 || j >= o.length) return;
+      [o[i], o[j]] = [o[j], o[i]]; S.settings.tabOrder = o; save(); render();
+    },
+    resetTabs: () => { delete S.settings.tabOrder; save(); render(); },
     delWeight: a => { const i = a.lastIndexOf(':'); const t = a.slice(0, i), kg = Number(a.slice(i + 1)); if (!confirm(`Eintrag ${C.fmt(kg)} kg vom ${dNum(t)} löschen?`)) return; const k = S.weights.findIndex(w => w.t === t && w.kg === kg); if (k >= 0) S.weights.splice(k, 1); save(); render(); },
     range: a => { ui.range = a; render(); },
     metric: a => { const i = a.indexOf(':'); ui.metric[a.slice(0, i)] = a.slice(i + 1); render(); },
@@ -869,7 +914,7 @@
           const data = C.validate(JSON.parse(r.result));
           if (S && !confirm('Alle Daten in der App werden durch diese Datei ersetzt. Fortfahren?')) return;
           S = data; S.notices = S.notices || []; for (const n of C.checkGoals(S)) S.notices.push(n);
-          save(); ui.tab = 'heute'; if (ui.stack.length) pop(ui.stack.length); else render(); toast('Daten geladen');
+          save(); ui.tab = tabOrder()[0]; if (ui.stack.length) pop(ui.stack.length); else render(); toast('Daten geladen');
         } catch (e) { toast(e.message || 'Die Datei konnte nicht gelesen werden.'); }
       };
       r.readAsText(f);
@@ -887,11 +932,11 @@
   // Aktive Seite aus der Scrollposition ableiten (ohne Neuaufbau)
   document.addEventListener('scroll', e => {
     const pg = e.target; if (!pg || pg.id !== 'pager' || ui.jumping) return;
-    const k = TAB_ORDER[Math.round(pg.scrollLeft / pg.clientWidth)];
+    const k = tabOrder()[Math.round(pg.scrollLeft / pg.clientWidth)];
     if (k && k !== ui.tab) { ui.tab = k; syncTabbar(); }
   }, true);
   document.addEventListener('scrollend', e => { if (e.target && e.target.id === 'pager') { ui.jumping = false; } }, true);
-  window.addEventListener('resize', () => { const pg = document.getElementById('pager'); if (pg && !ui.jumping) pg.scrollLeft = TAB_ORDER.indexOf(ui.tab) * pg.clientWidth; });
+  window.addEventListener('resize', () => { const pg = document.getElementById('pager'); if (pg && !ui.jumping) pg.scrollLeft = tabOrder().indexOf(ui.tab) * pg.clientWidth; });
 
   document.addEventListener('click', e => {
     const el = e.target.closest('[data-act]');
