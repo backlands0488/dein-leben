@@ -1,7 +1,7 @@
 :root{
   /* Dunkel (Standard) */
   --bg:#121114; --s1:#1C1A1F; --s2:#26232A; --s3:#322E37; --line:#2C2830; --grid:#25222A;
-  --tx:#EFEBE4; --mu:#A39D95; --fa:#6F6973;
+  --tx:#EFEBE4; --mu:#A39D95; --fa:#8B8590;
   --accent:#E9E4DA; --on-accent:#1A181C;
   --bone:#E9E4DA; --umber:#B58B71; --sage:#8FB3A0; --warn:#E3B66F; --danger:#E5806F;
   --due-bg:#2C251D; --due-tx:#F0D7AC; --good-bg:#1C2722; --good-tx:#CFE6D9;
@@ -15,14 +15,14 @@
 }
 :root[data-theme=dim]{
   --bg:#2A2C30; --s1:#33363B; --s2:#3D4046; --s3:#494C52; --line:#41444A; --grid:#3B3E44;
-  --tx:#E6E3DE; --mu:#B0ADA7; --fa:#878580;
+  --tx:#E6E3DE; --mu:#B0ADA7; --fa:#A29F9A;
   --accent:#E6E2DA; --on-accent:#222326;
   --bone:#E6E2DA; --umber:#C49A80; --sage:#9BC0AC; --warn:#E8C084; --danger:#EB8E7E;
   --due-bg:#4A4134; --due-tx:#F4E0BE; --good-bg:#354840; --good-tx:#D7ECE1;
 }
 :root[data-theme=light]{
   --bg:#F4F1EC; --s1:#FFFFFF; --s2:#ECE8E1; --s3:#DDD8CF; --line:#E4DFD7; --grid:#ECE8E1;
-  --tx:#211E22; --mu:#68625C; --fa:#9A948D;
+  --tx:#211E22; --mu:#68625C; --fa:#6E6862;
   --accent:#2A2629; --on-accent:#F7F4EF;
   --bone:#2A2629; --umber:#8A6249; --sage:#5C8B73; --warn:#B47E2A; --danger:#C2533F;
   --due-bg:#F6EAD5; --due-tx:#6B4C1C; --good-bg:#E2EEE7; --good-tx:#2D5241;
