@@ -34,13 +34,40 @@
   const TAB_LABELS = { heute: 'Heute', ziele: 'Ziele', training: 'Training', gewicht: 'Gewicht', mehr: 'Mehr' };
   const TAB_DEFAULT = ['heute', 'ziele', 'training', 'gewicht', 'mehr'];
   // Gespeicherte Reihenfolge nur übernehmen, wenn sie genau die fünf Seiten enthält
-  function tabOrder() {
+  function tabOrderAll() {
     const o = S && S.settings && S.settings.tabOrder;
     return Array.isArray(o) && o.length === TAB_DEFAULT.length && TAB_DEFAULT.every(k => o.includes(k)) ? o : TAB_DEFAULT;
   }
+  // „Mehr“ bleibt immer sichtbar, sonst wären die Einstellungen nicht mehr erreichbar
+  const tabHidden = () => { const h = S && S.settings && S.settings.tabHidden; return Array.isArray(h) ? h.filter(k => k !== 'mehr' && TAB_DEFAULT.includes(k)) : []; };
+  function tabOrder() { const h = tabHidden(); return tabOrderAll().filter(k => !h.includes(k)); }
+  // Einstellungen mit Standardwert
+  const setting = (k, def) => (S && S.settings && S.settings[k] !== undefined && S.settings[k] !== null ? S.settings[k] : def);
+  const SETTABLE = { fontScale: ['normal', 'large'], heuteView: ['tiles', 'list'], trainStart: ['ask', 'repeat', 'empty'], weightRange: ['auto', '1M', '3M', '6M', '1J'], backupDays: [1, 3, 7, 14, 30] };
+  const WEIGHT_LINES = [99, 92, 88, 85];
+  const weightLines = () => { const l = setting('weightLines', WEIGHT_LINES); return Array.isArray(l) ? l.filter(v => typeof v === 'number' && v >= 30 && v <= 300) : WEIGHT_LINES; };
+  const backupDays = () => { const v = Number(setting('backupDays', 7)); return SETTABLE.backupDays.includes(v) ? v : 7; };
+  // Gewohnheiten in eigener Reihenfolge; noch nicht einsortierte kommen in alter Reihenfolge ans Ende
+  function activeHabits() {
+    const ord = setting('habitOrder', []), act = S.habits.filter(h => !h.archived), base = new Map(act.map((h, i) => [h.id, i]));
+    const pos = h => { const i = ord.indexOf(h.id); return i < 0 ? 1e6 + base.get(h.id) : i; };
+    return act.sort((a, b) => pos(a) - pos(b));
+  }
+  const inRing = h => !setting('ringExclude', []).includes(h.id);
+  // Trainingskategorien: eigene Liste mit Farben; Kategorien aus Übungen, die (noch) fehlen, werden grau ergänzt
+  const CAT_DEFAULT = C.CATS.map(n => ({ name: n, color: CATCOL[n] }));
+  const CAT_COLORS = ['#E5806F', '#7FA6D6', '#8FB3A0', '#E3B66F', '#C9A9DD', '#B8C27A', '#F4A8CF', '#86D7C0', '#C49A80', '#9AA8A3'];
+  function cats() {
+    const st = setting('cats', null), list = (Array.isArray(st) && st.length ? st : CAT_DEFAULT).map(c => ({ ...c }));
+    for (const e of (S ? S.exercises : [])) if (e.cat && !list.some(c => c.name === e.cat)) list.push({ name: e.cat, color: '#9AA8A3' });
+    return list;
+  }
+  const catNames = () => cats().map(c => c.name);
+  const catCol = n => (cats().find(c => c.name === n) || {}).color || 'var(--fa)';
   function applyTheme() {
     const t = (S && S.settings && S.settings.theme) || 'dark';
     document.documentElement.dataset.theme = t;
+    if (setting('fontScale', 'normal') === 'large') document.documentElement.dataset.font = 'l'; else delete document.documentElement.dataset.font;
     const ac = ACCENTS[S && S.settings && S.settings.accent], st = document.documentElement.style;
     const props = ['--accent', '--on-accent', '--pc', '--on-pc', '--sage', '--good-bg', '--good-tx'];
     if (!ac || !ac[2]) props.forEach(p => st.removeProperty(p));
@@ -51,7 +78,7 @@
   let S = load();
   const ui = { tab: tabOrder()[0], stack: [], sheet: null, range: null, cal: {}, metric: {}, scroll: {} };
   // Standard: 1 Monat, solange der 30-Tage-Ø über 92 kg liegt, sonst 3 Monate
-  const rangeFor = ws => ui.range || (ws.avg !== null && ws.avg <= 92 ? '3M' : '1M');
+  const rangeFor = ws => ui.range || (setting('weightRange', 'auto') !== 'auto' ? setting('weightRange', 'auto') : (ws.avg !== null && ws.avg <= 92 ? '3M' : '1M'));
 
   // ---------- Speicher ----------
   function load() {
@@ -123,7 +150,7 @@
   }
   function tabbar() {
     const b = (id, ic, l) => `<button data-act="tab" data-arg="${id}" ${ui.tab === id ? 'aria-current="page"' : ''}><span class="ic"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[id]}</svg></span>${l}</button>`;
-    return `<nav class="tabs">${tabOrder().map(k => b(k, '', TAB_LABELS[k])).join('')}</nav>`;
+    return `<nav class="tabs" style="grid-template-columns:repeat(${tabOrder().length},1fr)">${tabOrder().map(k => b(k, '', TAB_LABELS[k])).join('')}</nav>`;
   }
 
   function viewWelcome() {
@@ -159,27 +186,30 @@
     } else if (ws.phase === 3 && ws.daily.length) m.buffer = C.T.relapse - ws.daily[ws.daily.length - 1].kg;
     return m;
   }
+  const MORE = '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><circle cx="6" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18" cy="12" r="1.7"/></svg>';
   const CHECK = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 
   function viewHeute() {
     const d = today(), pd = C.parseDay(d);
     const ws = C.weightStatus(S.weights, d);
-    const active = S.habits.filter(h => !h.archived);
+    const active = activeHabits();
     const stats = active.map(h => C.habitStats(S, h, d));
-    const done = stats.filter(st => st.days.has(d)).length;
+    const ri = active.map((h, i) => i).filter(i => inRing(active[i])), rh = ri.map(i => active[i]), rs = ri.map(i => stats[i]);
+    const done = rs.filter(st => st.days.has(d)).length;
     let out = `<div class="ph"><h1>${DAYS[pd.getDay()]}</h1><span class="meta num">${pd.getDate()}. ${MONTHS[pd.getMonth()]}</span></div>`;
     for (const [i, n] of (S.notices || []).entries()) out += `<div class="notice good row"><span class="grow">${esc(n)}</span><button class="btn sm ghost" data-act="dismiss" data-arg="${i}">OK</button></div>`;
     const running = S.sessions.find(s => s.kind === 'training' && !s.done);
     if (running) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="session:${running.id}"><span class="grow">Einheit #${String(running.num).padStart(3, '0')} läuft</span><b>›</b></button>`;
-    if (active.length) {
-      const wk = weekProgress(active, stats, d), frac = wk.P ? wk.D / wk.P : 0;
+    if (rh.length) {
+      const wk = weekProgress(rh, rs, d), frac = wk.P ? wk.D / wk.P : 0;
       const inner = wk.P && wk.D >= wk.P ? CHECK : `<b class="num" style="font-size:18px">${Math.round(frac * 100)}%</b>`;
       out += `<div class="hero-b">${ring(frac, 76, 9, 'var(--accent)', inner, wk.P ? wk.E / wk.P : null)}
-        <div><div class="hero-sub">Diese Woche</div><div class="hero-num num">${wk.D} von ${wk.P}</div><div class="hero-sub num">heute ${done} von ${active.length}</div></div></div>`;
+        <div><div class="hero-sub">Diese Woche</div><div class="hero-num num">${wk.D} von ${wk.P}</div><div class="hero-sub num">heute ${done} von ${rh.length}</div></div></div>`;
     }
     if (ws.due) out += `<div class="entry-b"><input type="text" inputmode="decimal" placeholder="Gewicht heute, kg" id="quickKg" aria-label="Gewicht in kg"><button class="fab" data-act="quickWeight" aria-label="Gewicht speichern">${CHECK}</button></div>`;
     if (S.settings.heightCm && C.measurementDue(S.measurements, d)) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="measure"><span class="grow">Umfänge messen</span><b>›</b></button>`;
     if (!active.length) out += `<div class="card"><button class="btn primary block" data-act="open" data-arg="habitEdit">Erste Gewohnheit anlegen</button></div>`;
+    else if (setting('heuteView', 'tiles') === 'list') out += `<div class="hlist2">${active.map((h, i) => habitRow(h, stats[i], d)).join('')}</div>`;
     else out += `<div class="tiles">${active.map((h, i) => habitTile(h, stats[i], d)).join('')}</div>`;
     return out;
   }
@@ -203,15 +233,29 @@
     });
     return { P, D, E };
   }
+  function weekBars(h, st, d) {
+    const ws = C.weekStart(d);
+    return WD.map((w, i) => { const day = C.addDays(ws, i); return `<i class="${st.days.has(day) ? 'on' : ''} ${day === d ? 'today' : ''} ${day > d || day < h.start ? 'off' : ''}" title="${w}"></i>`; }).join('');
+  }
+  function streakTxt(h, st) {
+    const weekly = h.type === 'weekly';
+    return `<b>${st.cur}</b> ${weekly ? (st.cur === 1 ? 'Woche' : 'Wochen') : (st.cur === 1 ? 'Tag' : 'Tage')}${weekly ? ` · ${st.week.n}/${st.week.t}` : ''}`;
+  }
+  const tickBtn = (h, on, d) => `<button class="tick ${on ? 'on' : ''}" data-act="${h.link === 'sport' ? 'sportSheet' : 'toggle'}" data-arg="${h.id}:${d}" aria-label="${esc(h.name)} heute abhaken" aria-pressed="${on}">${CHECK}</button>`;
   function habitTile(h, st, d) {
-    const ws = C.weekStart(d), on = st.days.has(d), weekly = h.type === 'weekly';
-    const bars = WD.map((w, i) => { const day = C.addDays(ws, i); return `<i class="${st.days.has(day) ? 'on' : ''} ${day === d ? 'today' : ''} ${day > d || day < h.start ? 'off' : ''}" title="${w}"></i>`; }).join('');
+    const on = st.days.has(d);
     return `<div class="tile ${on ? 'done' : ''}" style="--hc:${h.color}">
-      <div class="tile-top"><span class="tile-emo">${esc(h.emoji)}</span>
-      <button class="tick ${on ? 'on' : ''}" data-act="${h.link === 'sport' ? 'sportSheet' : 'toggle'}" data-arg="${h.id}:${d}" aria-label="${esc(h.name)} heute abhaken" aria-pressed="${on}">${CHECK}</button></div>
+      <div class="tile-top"><span class="tile-emo">${esc(h.emoji)}</span>${tickBtn(h, on, d)}</div>
       <button class="tile-body" data-act="open" data-arg="habit:${h.id}"><span class="tile-name">${esc(h.name)}</span>
-      <span class="tile-streak num"><b>${st.cur}</b> ${weekly ? (st.cur === 1 ? 'Woche' : 'Wochen') : (st.cur === 1 ? 'Tag' : 'Tage')}${weekly ? ` · ${st.week.n}/${st.week.t}` : ''}</span>
-      <span class="wbar">${bars}</span></button></div>`;
+      <span class="tile-streak num">${streakTxt(h, st)}</span>
+      <span class="wbar">${weekBars(h, st, d)}</span></button></div>`;
+  }
+  function habitRow(h, st, d) {
+    const on = st.days.has(d);
+    return `<div class="hl ${on ? 'done' : ''}" style="--hc:${h.color}">
+      <button class="hl-main" data-act="open" data-arg="habit:${h.id}"><span class="tile-emo">${esc(h.emoji)}</span>
+      <span class="hl-txt"><span class="tile-name">${esc(h.name)}</span><span class="tile-streak num">${streakTxt(h, st)}</span><span class="wbar">${weekBars(h, st, d)}</span></span></button>
+      ${tickBtn(h, on, d)}</div>`;
   }
 
   // ===== GEWOHNHEIT DETAIL =====
@@ -303,8 +347,11 @@
     const d = today(), y = d.slice(0, 4);
     const pauses = S.pauses.filter(p => !p.to || p.to >= d);
     const nEx = S.exercises.filter(e => C.exHistory(S, e.id).length).length;
+    const ts = setting('trainStart', 'ask');
+    const startBtn = ts === 'ask' ? '<button class="btn primary block xl" data-act="sheet" data-arg="startTraining">Einheit starten</button>'
+      : `<div class="row" style="gap:10px"><button class="btn primary xl grow" data-act="startTraining" data-arg="${ts}:">Einheit starten · ${ts === 'repeat' ? 'wie zuletzt' : 'leer'}</button><button class="iconbtn" style="width:56px;height:56px;flex:none" data-act="sheet" data-arg="startTraining" aria-label="Andere Startmöglichkeiten">${MORE}</button></div>`;
     let out = `<div class="ph"><h1>Training</h1><div class="meta"><span class="pill num">${C.trainings(S).filter(s => s.date.startsWith(y)).length} in ${y}</span></div></div>
-      <button class="btn primary block xl" data-act="sheet" data-arg="startTraining">Einheit starten</button>
+      ${startBtn}
       <div class="trio" style="margin:10px 0 0"><button class="card tilebtn act" data-act="newMove"><span class="tile-emo" style="--hc:var(--sage)">🚶</span><b>Bewegung</b><span class="faint small">eintragen</span></button>
       <button class="card tilebtn act" data-act="open" data-arg="progress"><span class="tile-emo" style="--hc:var(--umber)">📈</span><b>Fortschritt</b><span class="faint small num">${nEx} mit Verlauf</span></button>
       <button class="card tilebtn act" data-act="open" data-arg="exercises"><span class="tile-emo" style="--hc:#7FA6D6">🏋️</span><b>Übungen</b><span class="faint small num">${S.exercises.length} · neu</span></button></div>`;
@@ -319,8 +366,8 @@
       if (s.kind === 'move') {
         rows += `<button class="srow" data-act="open" data-arg="move:${s.id}"><span class="sn mv">🚶</span><span class="grow"><b>${day}</b><span class="cats">${esc(s.activity)} · ${s.min} Min.${s.min >= 60 ? ' · zählt' : ''}</span></span><span class="chev">›</span></button>`;
       } else {
-        const cats = C.CATS.filter(c => s.items.some(i => (C.exById(S, i.ex) || {}).cat === c));
-        rows += `<button class="srow" data-act="open" data-arg="session:${s.id}"><span class="sn num">${s.num}</span><span class="grow"><b>${day}</b>${s.done ? '' : ' <span class="pill due">läuft</span>'}<span class="cats">${cats.length ? cats.map(c => `<span class="ct"><i style="--c:${CATCOL[c]}"></i>${c}</span>`).join('') : 'noch leer'}</span></span><span class="chev">›</span></button>`;
+        const cats = catNames().filter(c => s.items.some(i => (C.exById(S, i.ex) || {}).cat === c));
+        rows += `<button class="srow" data-act="open" data-arg="session:${s.id}"><span class="sn num">${s.num}</span><span class="grow"><b>${day}</b>${s.done ? '' : ' <span class="pill due">läuft</span>'}<span class="cats">${cats.length ? cats.map(c => `<span class="ct"><i style="--c:${catCol(c)}"></i>${c}</span>`).join('') : 'noch leer'}</span></span><span class="chev">›</span></button>`;
       }
     }
     flush();
@@ -358,7 +405,7 @@
         `</div><button class="btn sm" data-act="addSet" data-arg="${s.id}:${idx}">+ Satz</button>`;
     }
     return `<div class="ex ${paused ? 'paused' : ''}"><div class="row between"><h3>${esc(ex.name)}${ex.uni ? ' <span class="faint small">pro Seite</span>' : ''}</h3>
-      <span>${paused ? '<span class="badge pause">pausiert</span> ' : ''}<span class="badge"><i class="cdot" style="--c:${CATCOL[ex.cat] || 'var(--fa)'}"></i>${esc(ex.cat)}</span></span></div>
+      <span>${paused ? '<span class="badge pause">pausiert</span> ' : ''}<span class="badge"><i class="cdot" style="--c:${catCol(ex.cat)}"></i>${esc(ex.cat)}</span></span></div>
       <p class="last">${lastTxt}</p>${body}
       <input type="text" style="margin-top:10px;min-height:40px;font-size:14px" placeholder="Notiz zur Übung" value="${esc(it.note || '')}" data-input="itemNote" data-arg="${s.id}:${idx}">
       <div class="row" style="justify-content:flex-end;margin-top:8px">${last ? `<button class="btn sm ghost" style="margin-right:auto" data-act="open" data-arg="exStats:${it.ex}">Verlauf</button>` : ''}<button class="btn sm ghost" data-act="moveItem" data-arg="${s.id}:${idx}:-1" aria-label="Nach oben">↑</button><button class="btn sm ghost" data-act="moveItem" data-arg="${s.id}:${idx}:1" aria-label="Nach unten">↓</button><button class="btn sm danger" data-act="delItem" data-arg="${s.id}:${idx}" aria-label="Übung entfernen">✕</button></div></div>`;
@@ -376,7 +423,7 @@
   }
   function screenExercises() {
     let out = header('Übungen') + `<button class="btn primary block xl" data-act="open" data-arg="exEdit">Neue Übung anlegen</button>`;
-    for (const cat of C.CATS) {
+    for (const cat of catNames()) {
       const list = S.exercises.filter(e => e.cat === cat).sort((a, b) => a.name.localeCompare(b.name, 'de'));
       if (!list.length) continue;
       out += `<h2>${cat}${C.pauseFor(S, cat) ? ' <span class="badge pause">pausiert</span>' : ''}</h2>` + list.map(e => `<button class="pick" data-act="open" data-arg="exEdit:${e.id}"><span>${esc(e.name)}</span><span class="faint small">${C.TYPES[e.type]}${e.uni ? ', pro Seite' : ''}</span></button>`).join('');
@@ -388,7 +435,7 @@
     const used = id && S.sessions.some(s => s.items && s.items.some(i => i.ex === id));
     return `${header(id ? 'Übung bearbeiten' : 'Neue Übung')}
       <label class="f"><span>Name</span><input type="text" id="eName" value="${esc(e.name)}" placeholder="Lunges"></label>
-      <div class="fields"><label class="f"><span>Kategorie</span><select id="eCat">${C.CATS.map(c => `<option ${c === e.cat ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+      <div class="fields"><label class="f"><span>Kategorie</span><select id="eCat">${catNames().map(c => `<option ${c === e.cat ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
       <label class="f"><span>Messart</span><select id="eType">${Object.entries(C.TYPES).map(([k, v]) => `<option value="${k}" ${k === e.type ? 'selected' : ''}>${v}</option>`).join('')}</select></label></div>
       <label class="check" style="margin:0 0 18px"><input type="checkbox" id="eUni" ${e.uni ? 'checked' : ''}> Einseitig (Gewicht pro Hantel, Wdh. pro Seite)</label>
       <button class="btn primary block" data-act="saveEx" data-arg="${id || ''}:${sessionId || ''}">Speichern</button>
@@ -399,7 +446,7 @@
     const d = today();
     let out = header('Pausen', infoBtn('pauses'));
     for (const p of [...S.pauses].reverse()) out += `<div class="card row between"><span><b>${esc(p.cat)}</b><br><span class="muted small">${dNum(p.from)} – ${p.to ? dNum(p.to) : 'offen'}</span></span>${!p.to || p.to >= d ? `<button class="btn sm ghost" data-act="endPause" data-arg="${p.id}">Beenden</button>` : ''}</div>`;
-    out += `<h2>Neue Pause</h2><div class="fields"><select id="pCat">${C.CATS.map(c => `<option>${c}</option>`).join('')}</select><button class="btn primary" data-act="addPause">Pausieren</button></div>`;
+    out += `<h2>Neue Pause</h2><div class="fields"><select id="pCat">${catNames().map(c => `<option>${c}</option>`).join('')}</select><button class="btn primary" data-act="addPause">Pausieren</button></div>`;
     return out;
   }
 
@@ -433,7 +480,7 @@
   function niceStep(x) { const p = Math.pow(10, Math.floor(Math.log10(x || 1))); const f = x / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; }
   function screenProgress() {
     let out = header('Fortschritt');
-    for (const cat of C.CATS) {
+    for (const cat of catNames()) {
       const rows = S.exercises.filter(e => e.cat === cat).map(e => ({ e, h: C.exHistory(S, e.id) })).filter(x => x.h.length)
         .sort((a, b) => b.h[b.h.length - 1].d.localeCompare(a.h[a.h.length - 1].d));
       if (!rows.length) continue;
@@ -450,7 +497,7 @@
   function screenExStats({ id }) {
     const ex = C.exById(S, id); if (!ex) return header('Nicht gefunden');
     const h = C.exHistory(S, id), m = metricOf(ex), list = C.METRICS[ex.type] || [];
-    let out = header(esc(ex.name), infoBtn('ex')) + `<div class="pills" style="margin:0 0 14px"><span class="pill"><i class="cdot" style="--c:${CATCOL[ex.cat] || 'var(--fa)'}"></i>${esc(ex.cat)}</span><span class="pill">${C.TYPES[ex.type]}</span>${ex.uni ? '<span class="pill">pro Seite</span>' : ''}</div>`;
+    let out = header(esc(ex.name), infoBtn('ex')) + `<div class="pills" style="margin:0 0 14px"><span class="pill"><i class="cdot" style="--c:${catCol(ex.cat)}"></i>${esc(ex.cat)}</span><span class="pill">${C.TYPES[ex.type]}</span>${ex.uni ? '<span class="pill">pro Seite</span>' : ''}</div>`;
     if (!h.length) return out + '<p class="muted">Noch keine Einträge.</p>';
     if (!m) {
       return out + `<div class="stats"><div class="stat"><b class="num">${h.length}</b><span>Mal erledigt</span></div><div class="stat"><b class="num" style="font-size:18px">${dNum(h[0].d)}</b><span>Erstes Mal</span></div><div class="stat"><b class="num" style="font-size:18px">${dNum(h[h.length - 1].d)}</b><span>Zuletzt</span></div></div>`;
@@ -534,7 +581,7 @@
     let g = '';
     const stepY = hi - lo > 20 ? 5 : 2;
     for (let v = Math.ceil(lo / stepY) * stepY; v <= hi; v += stepY) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" style="stroke:var(--grid)"/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end" font-size="11" style="fill:var(--fa)">${v}</text>`;
-    for (const ref of [99, 92, 88, 85]) if (ref >= lo && ref <= hi) g += `<line x1="${L}" x2="${W - R}" y1="${Y(ref)}" y2="${Y(ref)}" style="stroke:var(--warn)" stroke-dasharray="4 5" stroke-width="1" stroke-opacity=".8"/><text class="ref" x="${W - R}" y="${Y(ref) - 4}" text-anchor="end" style="fill:var(--warn)">${ref}</text>`;
+    for (const ref of weightLines()) if (ref >= lo && ref <= hi) g += `<line x1="${L}" x2="${W - R}" y1="${Y(ref)}" y2="${Y(ref)}" style="stroke:var(--warn)" stroke-dasharray="4 5" stroke-width="1" stroke-opacity=".8"/><text class="ref" x="${W - R}" y="${Y(ref) - 4}" text-anchor="end" style="fill:var(--warn)">${C.fmtW(ref)}</text>`;
     // Monatsmarken
     let mk = C.monthStart(C.addDays(from, 31)), lastLabel = -99;
     if (span <= 31) { for (let k = 0; k <= 4; k++) { const dd = C.addDays(from, Math.round(span * k / 4)); g += `<text x="${X(dd)}" y="${H - 6}" font-size="11" style="fill:var(--fa)" text-anchor="${k === 0 ? 'start' : k === 4 ? 'end' : 'middle'}">${Number(dd.slice(8))}.${Number(dd.slice(5, 7))}.</text>`; } mk = '9999'; }
@@ -561,38 +608,78 @@
     const ago = S.lastBackup ? C.diffDays(S.lastBackup.slice(0, 10), today()) : null;
     const agoTxt = ago === null ? 'noch nie' : ago === 0 ? 'heute' : ago === 1 ? 'gestern' : `vor ${ago} Tagen`;
     const row = (arg, l, v) => `<button class="srow" data-act="open" data-arg="${arg}"><span class="grow"><b>${l}</b></span><span class="muted num">${v}</span><span class="chev">›</span></button>`;
+    const seg = (key, opts) => `<div class="seg wide">${opts.map(([k, l]) => `<button aria-pressed="${String(setting(key, DEFAULTS[key])) === String(k)}" data-act="setting" data-arg="${key}:${k}">${l}</button>`).join('')}</div>`;
+    const set = (label, inner) => `<div class="opt"><span class="lbl">${label}</span>${inner}</div>`;
     const acc = ACCENTS[S.settings.accent] ? S.settings.accent : 'mint';
+    const act = activeHabits(), nIn = act.filter(inRing).length, hidN = tabHidden().length;
     return `<div class="ph"><h1>Mehr</h1></div>
       <div class="card"><div class="row between"><span class="lbl">Backup</span>${infoBtn('backup')}</div>
       <div class="hero-num num" style="margin:2px 0 14px">${agoTxt}${S.lastBackup ? ` <span class="faint small" style="font-weight:500">${dNum(S.lastBackup)}</span>` : ''}</div>
       <button class="btn primary block" data-act="backup">Jetzt sichern</button>
-      <div class="duo" style="margin-top:10px">${navigator.canShare ? '<button class="btn block" data-act="shareBackup">Teilen</button>' : ''}<label class="btn ghost block" style="display:grid;place-items:center${navigator.canShare ? '' : ';grid-column:1 / -1'}">Wiederherstellen<input type="file" accept=".json,application/json" data-change="restore" hidden></label></div></div>
+      <div class="duo" style="margin-top:10px">${navigator.canShare ? '<button class="btn block" data-act="shareBackup">Teilen</button>' : ''}<label class="btn ghost block" style="display:grid;place-items:center${navigator.canShare ? '' : ';grid-column:1 / -1'}">Wiederherstellen<input type="file" accept=".json,application/json" data-change="restore" hidden></label></div>
+      ${set('Automatisch alle … Tage', seg('backupDays', SETTABLE.backupDays.map(v => [v, v])))}</div>
       <div class="lbl mon">Verwalten</div>
-      <div class="wlist">${row('habits', 'Gewohnheiten', S.habits.length)}${row('exercises', 'Übungen', S.exercises.length)}${row('pauses', 'Pausen', `${S.pauses.filter(p => !p.to).length} aktiv`)}</div>
+      <div class="wlist">${row('habits', 'Gewohnheiten', act.length)}${row('exercises', 'Übungen', S.exercises.length)}${row('cats', 'Kategorien', cats().length)}${row('pauses', 'Pausen', `${S.pauses.filter(p => !p.to).length} aktiv`)}</div>
       <div class="lbl mon">Darstellung</div>
       <div class="seg wide">${THEMES.map(([k, l]) => `<button aria-pressed="${(S.settings.theme || 'dark') === k}" data-act="theme" data-arg="${k}">${l}</button>`).join('')}</div>
       <div class="card accents"><div class="row between"><span class="lbl">Akzentfarbe</span><span class="muted small">${ACCENTS[acc][0]}</span></div>
       <div class="swatches">${Object.entries(ACCENTS).map(([k, v]) => `<button class="swatch" style="background:${v[1]}" aria-pressed="${k === acc}" data-act="accent" data-arg="${k}" aria-label="Akzentfarbe ${v[0]}">${k === acc ? CHECK : ''}</button>`).join('')}</div></div>
-      <div class="wlist">${row('tabOrder', 'Reihenfolge der Seiten', `Start: ${TAB_LABELS[tabOrder()[0]]}`)}</div>
-      <div class="lbl mon">Körpergröße</div>
-      <div class="entry-b"><input type="text" inputmode="decimal" value="${S.settings.heightCm || ''}" data-change="height" aria-label="Körpergröße in cm" placeholder="cm"><span class="muted" style="margin-right:8px">cm</span></div>
+      <div class="card">${set('Schrift', seg('fontScale', [['normal', 'Normal'], ['large', 'Groß']]))}${set('Gewohnheiten auf „Heute“', seg('heuteView', [['tiles', 'Kacheln'], ['list', 'Liste']]))}</div>
+      <div class="wlist">${row('tabOrder', 'Seiten', `Start: ${TAB_LABELS[tabOrder()[0]]}${hidN ? ` · ${hidN} aus` : ''}`)}${row('ring', 'Wochenring', `${nIn} von ${act.length}`)}</div>
+      <div class="lbl mon">Training</div>
+      <div class="card">${set('„Einheit starten“', seg('trainStart', [['ask', 'Fragen'], ['repeat', 'Wie zuletzt'], ['empty', 'Leer']]))}</div>
+      <div class="lbl mon">Gewicht</div>
+      <div class="card">${set('Diagramm zeigt zuerst', seg('weightRange', [['auto', 'Auto'], ['1M', '1M'], ['3M', '3M'], ['6M', '6M'], ['1J', '1J']]))}
+      <div class="opt"><label class="lbl" for="wLines">Markierungen in kg</label><input type="text" id="wLines" inputmode="decimal" value="${weightLines().map(C.fmtW).join(' ')}" data-change="weightLines" placeholder="z. B. 99 92 88"></div>
+      <div class="opt"><label class="lbl" for="hCm">Körpergröße in cm</label><input type="text" id="hCm" inputmode="decimal" value="${S.settings.heightCm || ''}" data-change="height" placeholder="cm"></div></div>
       <p class="faint small" id="persist" style="margin:18px 0 4px">…</p>
-      <p class="faint small" style="margin:0">Dein Leben 2.3.0</p>`;
+      <p class="faint small" style="margin:0">Dein Leben 2.4.0</p>`;
   }
+  const DEFAULTS = { fontScale: 'normal', heuteView: 'tiles', trainStart: 'ask', weightRange: 'auto', backupDays: 7 };
+  const iconOf = k => `<span class="sn"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg></span>`;
+  const emoOf = h => `<span class="sn" style="background:color-mix(in srgb,${h.color} 28%,var(--s2));font-size:20px">${esc(h.emoji)}</span>`;
+  const upDown = (act, i, last, name) => `<button class="iconbtn sm" data-act="${act}" data-arg="${i}:-1" aria-label="${name} nach oben" ${i === 0 ? 'disabled' : ''}>↑</button><button class="iconbtn sm" data-act="${act}" data-arg="${i}:1" aria-label="${name} nach unten" ${i === last ? 'disabled' : ''}>↓</button>`;
   function screenTabOrder() {
-    const o = tabOrder(), last = o.length - 1;
-    const ic = k => `<span class="sn"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg></span>`;
-    return `${header('Reihenfolge der Seiten')}
-      <div class="wlist">${o.map((k, i) => `<div class="srow"><span class="faint num" style="width:14px">${i + 1}</span>${ic(k)}<span class="grow"><b>${TAB_LABELS[k]}</b>${i === 0 ? ' <span class="pill">Start</span>' : ''}</span>
-        <button class="iconbtn sm" data-act="moveTab" data-arg="${i}:-1" aria-label="${TAB_LABELS[k]} nach oben" ${i === 0 ? 'disabled' : ''}>↑</button>
-        <button class="iconbtn sm" data-act="moveTab" data-arg="${i}:1" aria-label="${TAB_LABELS[k]} nach unten" ${i === last ? 'disabled' : ''}>↓</button></div>`).join('')}</div>
-      <p class="faint small" style="margin:12px 4px">Die oberste Seite öffnet sich beim Start. Wischen folgt derselben Reihenfolge.</p>
-      <button class="btn ghost block" data-act="resetTabs" ${o === TAB_DEFAULT ? 'disabled' : ''}>Zurücksetzen</button>`;
+    const o = tabOrderAll(), last = o.length - 1, hid = tabHidden(), first = tabOrder()[0];
+    return `${header('Seiten')}
+      <div class="wlist">${o.map((k, i) => `<div class="srow ${hid.includes(k) ? 'off' : ''}">${iconOf(k)}<span class="grow"><b>${TAB_LABELS[k]}</b>${k === first ? ' <span class="pill">Start</span>' : ''}</span>
+        ${k === 'mehr' ? '<span style="width:52px;flex:none"></span>' : `<input type="checkbox" class="sw" ${hid.includes(k) ? '' : 'checked'} data-change="tabShow" data-arg="${k}" aria-label="${TAB_LABELS[k]} anzeigen">`}
+        ${upDown('moveTab', i, last, TAB_LABELS[k])}</div>`).join('')}</div>
+      <p class="faint small" style="margin:12px 4px">Die oberste sichtbare Seite öffnet sich beim Start. „Mehr“ bleibt immer sichtbar.</p>
+      <button class="btn ghost block" data-act="resetTabs" ${o === TAB_DEFAULT && !hid.length ? 'disabled' : ''}>Zurücksetzen</button>`;
   }
   function screenHabits() {
-    const row = h => `<button class="pick" data-act="open" data-arg="habit:${h.id}"><span>${esc(h.emoji)} ${esc(h.name)}</span><span class="faint small">${h.archived ? 'archiviert' : ''} ›</span></button>`;
-    const a = S.habits.filter(h => !h.archived), z = S.habits.filter(h => h.archived);
-    return header('Gewohnheiten', `<button class="btn sm ghost" data-act="open" data-arg="habitEdit">Neu</button>`) + a.map(row).join('') + (z.length ? `<h2>Archiviert</h2>${z.map(row).join('')}` : '');
+    const a = activeHabits(), z = S.habits.filter(h => h.archived), last = a.length - 1;
+    const open = h => `<button class="row grow rowbtn" data-act="open" data-arg="habit:${h.id}">${emoOf(h)}<b class="grow">${esc(h.name)}</b></button>`;
+    return `${header('Gewohnheiten')}
+      <button class="btn primary block xl" data-act="open" data-arg="habitEdit">Neue Gewohnheit</button>
+      ${a.length ? `<div class="lbl mon">Reihenfolge auf „Heute“</div><div class="wlist">${a.map((h, i) => `<div class="srow">${open(h)}${upDown('moveHabit', i, last, esc(h.name))}</div>`).join('')}</div>` : ''}
+      ${z.length ? `<div class="lbl mon">Archiviert</div><div class="wlist">${z.map(h => `<div class="srow">${open(h)}<span class="chev">›</span></div>`).join('')}</div>` : ''}`;
+  }
+  function screenRing() {
+    const a = activeHabits(), ex = setting('ringExclude', []);
+    return `${header('Wochenring')}
+      <div class="wlist">${a.map(h => `<label class="srow" style="cursor:pointer">${emoOf(h)}<b class="grow">${esc(h.name)}</b><input type="checkbox" class="sw" ${ex.includes(h.id) ? '' : 'checked'} data-change="ringToggle" data-arg="${h.id}" aria-label="${esc(h.name)} im Wochenring zählen"></label>`).join('')}</div>
+      <p class="faint small" style="margin:12px 4px">Ausgeschaltete Gewohnheiten bleiben auf „Heute“, zählen aber nicht im Ring.</p>`;
+  }
+  function screenCats() {
+    const list = cats(), last = list.length - 1, n = c => S.exercises.filter(e => e.cat === c).length;
+    return `${header('Kategorien')}
+      <button class="btn primary block xl" data-act="open" data-arg="catEdit:">Neue Kategorie</button>
+      <div class="wlist" style="margin-top:12px">${list.map((c, i) => `<div class="srow"><button class="row grow rowbtn" data-act="open" data-arg="catEdit:${i}"><span class="sn" style="background:color-mix(in srgb,${c.color} 30%,var(--s2))"><i class="cdot" style="--c:${c.color};margin:0;width:12px;height:12px"></i></span><span class="grow"><b>${esc(c.name)}</b> <span class="faint small num">${n(c.name)}</span></span></button>
+        ${upDown('moveCat', i, last, esc(c.name))}</div>`).join('')}</div>
+      <p class="faint small" style="margin:12px 4px">Die Reihenfolge gilt für alle Listen im Training.</p>`;
+  }
+  function screenCatEdit({ idx }) {
+    const list = cats(), c = idx === null || idx === undefined ? null : list[idx];
+    const used = c ? S.exercises.filter(e => e.cat === c.name).length : 0;
+    ui.draftColor = ui.draftColor || (c ? c.color : CAT_COLORS[7]);
+    return `${header(c ? 'Kategorie bearbeiten' : 'Neue Kategorie')}
+      <label class="f"><span>Name</span><input type="text" id="cName" value="${c ? esc(c.name) : ''}" placeholder="Mobilität"></label>
+      <label class="f"><span>Farbe</span><div class="swatches">${CAT_COLORS.map(col => `<button class="swatch" style="background:${col}" aria-pressed="${col === ui.draftColor}" data-act="color" data-arg="${col}" aria-label="Farbe ${col}"></button>`).join('')}</div></label>
+      ${used ? `<p class="faint small">${used} Übungen · ein neuer Name gilt auch für sie</p>` : ''}
+      <button class="btn primary block" data-act="saveCat" data-arg="${c ? idx : ''}">Speichern</button>
+      ${c && !used ? `<div style="height:10px"></div><button class="btn danger block" data-act="deleteCat" data-arg="${idx}">Löschen</button>` : ''}`;
   }
 
   // ===== ZIELE =====
@@ -665,7 +752,7 @@
   function logGoal(year, action, title, reason) { S.goalLog.push({ t: C.nowLocal(), year: String(year), action, title, reason: reason || '' }); }
 
   const TABS = { heute: viewHeute, ziele: viewZiele, training: viewTraining, gewicht: viewGewicht, mehr: viewMehr };
-  const SCREENS = { tabOrder: screenTabOrder, habit: screenHabit, habitEdit: screenHabitEdit, session: screenSession, move: screenMove, exercises: screenExercises, exEdit: screenExEdit, pauses: screenPauses, weights: screenWeights, measure: screenMeasure, habits: screenHabits, goalEdit: screenGoalEdit, progress: screenProgress, exStats: screenExStats };
+  const SCREENS = { tabOrder: screenTabOrder, ring: screenRing, cats: screenCats, catEdit: screenCatEdit, habit: screenHabit, habitEdit: screenHabitEdit, session: screenSession, move: screenMove, exercises: screenExercises, exEdit: screenExEdit, pauses: screenPauses, weights: screenWeights, measure: screenMeasure, habits: screenHabits, goalEdit: screenGoalEdit, progress: screenProgress, exStats: screenExStats };
 
   // ---------- Sheets ----------
   const INFOS = {
@@ -673,7 +760,7 @@
       <p><b>Ring:</b> Anteil am Jahresziel. Der Strich zeigt, wo du heute laut gleichmäßigem Plan stehen solltest.</p>
       <p><b>Gewicht:</b> Es zählt der 30-Tage-Ø am 31.12. Der Plan läuft linear vom Ø am Jahresanfang bis zum Ziel; die Prognose schreibt dein Tempo der letzten 8 Wochen fort.</p>
       <p><b>Sperre:</b> Bis 31.12. des Vorjahres frei änderbar, höchstens drei Ziele. Ab 01.01. gesperrt, außer vom 24. bis 30.06. mit schriftlicher Begründung.</p>`],
-    backup: ['Backup', () => `<p>Deine Daten liegen nur auf diesem Handy. Alle 7 Tage speichert die App beim ersten Tippen nach dem Öffnen automatisch ein Backup in „Downloads“.</p>
+    backup: ['Backup', () => `<p>Deine Daten liegen nur auf diesem Handy. ${backupDays() === 1 ? 'Jeden Tag' : `Alle ${backupDays()} Tage`} speichert die App beim ersten Tippen nach dem Öffnen automatisch ein Backup in „Downloads“.</p>
       <p><b>Wiederherstellen</b> ersetzt alle Daten in der App durch die gewählte Datei.</p>`],
     habit: ['Gewohnheit', () => `<p><b>Kalender:</b> Tippe auf einen Tag, um ihn nachzutragen oder zu entfernen. Sport ergibt sich automatisch aus Trainings und Bewegung ab 60 Minuten.</p>
       <p><b>Quote:</b> Bei „X-mal pro Woche“ zählen Monat und Jahr den Anteil der Wochen mit erreichtem Ziel.</p>`],
@@ -690,7 +777,7 @@
         <p><b>Ø 30 Tage:</b> Durchschnitt der letzten 30 Tage. Pro Tag zählt nur die erste Messung.</p>
         <p><b>Phasen:</b> ${[th.down ? 'Weiter: ' + th.down : '', th.up ? 'Zurück: ' + th.up : ''].filter(Boolean).join('<br>')}</p>
         <p><b>Tempo und Prognose:</b> Trend der Tageswerte der letzten 8 Wochen, linear fortgeschrieben. Abnehmen wird mit der Zeit meist langsamer.${fcs.length ? '<br>' + fcs.join('<br>') : ''}</p>
-        <p><b>Diagramm:</b> Punkte sind Tageswerte, die Linie ist der 30-Tage-Ø, gestrichelt deine Marken 99, 92, 88 und 85 kg.</p>
+        <p><b>Diagramm:</b> Punkte sind Tageswerte, die Linie ist der 30-Tage-Ø${weightLines().length ? `, gestrichelt deine Marken ${weightLines().map(C.fmtW).join(' · ')} kg` : ''}.</p>
         <p><b>Körperfett:</b> Navy-Methode aus Hals- und Bauchumfang, einmal pro Quartal.</p>
         <p><b>Einträge löschen:</b> unter „Alle Einträge“.</p></div>
         <button class="btn block" data-act="closeSheet">Verstanden</button>`;
@@ -704,7 +791,7 @@
     picker: ({ sid }) => {
       const s = S.sessions.find(x => x.id === sid);
       let out = `<h3>Übung hinzufügen</h3>`;
-      for (const cat of C.CATS) {
+      for (const cat of catNames()) {
         const list = S.exercises.filter(e => e.cat === cat).sort((a, b) => a.name.localeCompare(b.name, 'de'));
         if (!list.length) continue;
         const paused = C.pauseFor(S, cat, s ? s.date : today());
@@ -784,6 +871,7 @@
       else if (n === 'goalEdit') { const [id, y] = v.split(':'); push('goalEdit', { id: id || null, year: y || null }); }
       else if (n === 'exEdit') { const [id, sid] = v.split(':'); push('exEdit', { id: id || null, sessionId: sid || null }); }
       else if (n === 'exStats') push('exStats', { id: v });
+      else if (n === 'catEdit') { ui.draftColor = null; push('catEdit', { idx: v === '' ? null : Number(v) }); }
       else push(n); },
     dismiss: a => { S.notices.splice(Number(a), 1); save(); render(); },
     startEmpty: () => { S = C.emptyState(); save(); render(); },
@@ -853,11 +941,45 @@
     theme: a => { S.settings.theme = a; save(); render(); },
     accent: a => { if (!ACCENTS[a]) return; S.settings.accent = a; save(); render(); },
     moveTab: a => {
-      const [i, dir] = a.split(':').map(Number), o = [...tabOrder()], j = i + dir;
+      const [i, dir] = a.split(':').map(Number), o = [...tabOrderAll()], j = i + dir;
       if (j < 0 || j >= o.length) return;
       [o[i], o[j]] = [o[j], o[i]]; S.settings.tabOrder = o; save(); render();
     },
-    resetTabs: () => { delete S.settings.tabOrder; save(); render(); },
+    resetTabs: () => { delete S.settings.tabOrder; delete S.settings.tabHidden; save(); render(); },
+    setting: a => {
+      const i = a.indexOf(':'), k = a.slice(0, i); let v = a.slice(i + 1);
+      if (k === 'backupDays') v = Number(v);
+      if (!SETTABLE[k] || !SETTABLE[k].includes(v)) return;
+      S.settings[k] = v; if (k === 'weightRange') ui.range = null; save(); render();
+    },
+    moveHabit: a => {
+      const [i, dir] = a.split(':').map(Number), ids = activeHabits().map(h => h.id), j = i + dir;
+      if (j < 0 || j >= ids.length) return;
+      [ids[i], ids[j]] = [ids[j], ids[i]]; S.settings.habitOrder = ids; save(); render();
+    },
+    saveCat: a => {
+      const name = document.getElementById('cName').value.trim(); if (!name) return toast('Gib der Kategorie einen Namen.');
+      const list = cats(), i = a === '' ? -1 : Number(a);
+      if (list.some((c, k) => k !== i && c.name.toLowerCase() === name.toLowerCase())) return toast('Diese Kategorie gibt es schon.');
+      const color = ui.draftColor || CAT_COLORS[7];
+      if (i < 0) list.push({ name, color });
+      else {
+        const old = list[i].name; list[i] = { name, color };
+        if (old !== name) { S.exercises.forEach(e => { if (e.cat === old) e.cat = name; }); S.pauses.forEach(p => { if (p.cat === old) p.cat = name; }); }
+      }
+      S.settings.cats = list; save(); pop(); toast('Gespeichert');
+    },
+    deleteCat: a => {
+      const list = cats(), i = Number(a), c = list[i]; if (!c) return;
+      if (S.exercises.some(e => e.cat === c.name)) return toast('Zu dieser Kategorie gehören noch Übungen.');
+      if (!confirm(`Kategorie „${c.name}“ löschen?`)) return;
+      list.splice(i, 1); S.settings.cats = list; save(); pop();
+    },
+    moveCat: a => {
+      const [i, dir] = a.split(':').map(Number), list = cats(), j = i + dir;
+      if (j < 0 || j >= list.length) return;
+      [list[i], list[j]] = [list[j], list[i]]; S.settings.cats = list; save(); render();
+    },
     delWeight: a => { const i = a.lastIndexOf(':'); const t = a.slice(0, i), kg = Number(a.slice(i + 1)); if (!confirm(`Eintrag ${C.fmt(kg)} kg vom ${dNum(t)} löschen?`)) return; const k = S.weights.findIndex(w => w.t === t && w.kg === kg); if (k >= 0) S.weights.splice(k, 1); save(); render(); },
     range: a => { ui.range = a; render(); },
     metric: a => { const i = a.indexOf(':'); ui.metric[a.slice(0, i)] = a.slice(i + 1); render(); },
@@ -923,12 +1045,22 @@
     moveField: (el, a) => INPUTS.moveField(el, a),
     itemDone: (el, a) => { const [sid, idx] = a.split(':'); S.sessions.find(x => x.id === sid).items[Number(idx)].done = el.checked; save(); },
     goalType: el => { document.querySelectorAll('[data-gtype]').forEach(x => { x.hidden = x.dataset.gtype !== el.value; }); },
+    ringToggle: (el, a) => { const ex = setting('ringExclude', []).filter(x => x !== a); if (!el.checked) ex.push(a); S.settings.ringExclude = ex; save(); },
+    tabShow: (el, a) => {
+      const h = tabHidden().filter(x => x !== a); if (!el.checked) h.push(a);
+      S.settings.tabHidden = h; if (h.includes(ui.tab)) ui.tab = tabOrder()[0]; save(); render();
+    },
+    weightLines: el => {
+      const v = el.value.split(/[\s;]+/).map(x => C.num(x.replace(/,+$/, ''))).filter(x => x !== null && x >= 30 && x <= 300);
+      S.settings.weightLines = [...new Set(v)].sort((x, y) => y - x).slice(0, 6); save(); render();
+      toast(S.settings.weightLines.length ? `Markierungen: ${S.settings.weightLines.map(C.fmtW).join(' · ')} kg` : 'Keine Markierungen');
+    },
     height: el => { const v = C.num(el.value); S.settings.heightCm = v; save(); toast(v ? `Körpergröße ${C.fmt(v, 0)} cm` : 'Körpergröße entfernt'); }
   };
 
-  // Wöchentliches Backup beim ersten Tippen (Downloads brauchen eine Nutzeraktion)
-  const backupDue = () => S && (!S.lastBackup || C.diffDays(S.lastBackup.slice(0, 10), today()) >= 7);
-  document.addEventListener('click', e => { if (backupDue() && !e.target.closest('[data-act=backup],[data-act=shareBackup]')) { download(backupName(), backupText()); toast('Wöchentliches Backup gespeichert (Downloads)'); } }, true);
+  // Automatisches Backup beim ersten Tippen (Downloads brauchen eine Nutzeraktion)
+  const backupDue = () => S && (!S.lastBackup || C.diffDays(S.lastBackup.slice(0, 10), today()) >= backupDays());
+  document.addEventListener('click', e => { if (backupDue() && !e.target.closest('[data-act=backup],[data-act=shareBackup]')) { download(backupName(), backupText()); toast('Automatisches Backup gespeichert (Downloads)'); } }, true);
   // Aktive Seite aus der Scrollposition ableiten (ohne Neuaufbau)
   document.addEventListener('scroll', e => {
     const pg = e.target; if (!pg || pg.id !== 'pager' || ui.jumping) return;

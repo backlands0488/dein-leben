@@ -338,3 +338,27 @@ input[type=text],input[type=number],input[type=date],input[type=datetime-local],
 .srow .iconbtn.sm{flex:none}
 .card.accents .swatch{display:grid;place-items:center;padding:0;color:#10140F}
 .card.accents .swatch[aria-pressed=true]{box-shadow:none;border-color:transparent}
+
+/* ---------- 2.4: Anpassungen ---------- */
+.opt{display:flex;flex-direction:column;gap:8px}
+.opt+.opt,.duo+.opt{margin-top:16px}
+.opt .seg.wide{display:flex}
+.rowbtn{border:0;background:transparent;padding:0;text-align:left;min-height:48px;min-width:0;gap:12px}
+.rowbtn b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.srow.off .sn,.srow.off b{opacity:.45}
+input.sw{appearance:none;-webkit-appearance:none;width:52px;height:32px;border-radius:999px;background:var(--s3);position:relative;flex:none;margin:0;cursor:pointer;transition:background .15s}
+input.sw::after{content:"";position:absolute;top:4px;left:4px;width:24px;height:24px;border-radius:50%;background:var(--mu);transition:transform .15s}
+input.sw:checked{background:var(--accent)}
+input.sw:checked::after{transform:translateX(20px);background:var(--on-accent)}
+/* Heute als Liste */
+.hlist2{background:var(--s1);border-radius:var(--r);padding:2px 12px}
+.hl{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.hl:first-child{border-top:0}
+.hl-main{flex:1;min-width:0;display:flex;align-items:center;gap:12px;border:0;background:transparent;padding:0;text-align:left}
+.hl .tile-emo{width:44px;height:44px;border-radius:14px;font-size:22px;flex:none}
+.hl-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.hl .tile-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hl .wbar{max-width:170px;margin-top:4px}
+.hl .tick{width:44px;height:44px;flex:none}
+/* Große Schrift: alles innerhalb der Seiten wird gleichmäßig größer */
+:root[data-font=l] main,:root[data-font=l] nav.tabs,:root[data-font=l] .sheet,:root[data-font=l] #toast{zoom:1.15}
