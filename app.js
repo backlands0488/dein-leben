@@ -105,35 +105,54 @@
   }
 
   // ===== HEUTE =====
+  // Gemeinsame Hilfen für die Entwürfe
+  function ring(frac, size, sw, color, inner = '') {
+    const r = (size - sw) / 2, c = 2 * Math.PI * r, f = Math.max(0, Math.min(1, frac || 0));
+    return `<div class="ring" style="width:${size}px;height:${size}px"><svg viewBox="0 0 ${size} ${size}" aria-hidden="true"><circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" style="stroke:var(--track)" stroke-width="${sw}"/><circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" style="stroke:${color}" stroke-width="${sw}" stroke-linecap="round" stroke-dasharray="${(c * f).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 ${size / 2} ${size / 2})"/></svg><div class="ring-in">${inner}</div></div>`;
+  }
+  function weightModel(ws, tp, d) {
+    const m = { phase: ws.phase, avg: ws.avg };
+    const mon = s => `${MONTHS[C.parseDay(s).getMonth()].slice(0, 3)} ${s.slice(2, 4)}`;
+    if (ws.phase === 1 && ws.avg !== null) {
+      const sw = [...ws.switches].reverse().find(s => s.to === 1);
+      const a0 = Math.max(C.avg30(ws.daily, sw ? sw.d : ws.daily[0].d), ws.avg);
+      m.left = Math.max(0, ws.avg - C.T.p1to3);
+      m.rl = ws.relapse ? Math.max(0, C.T.relapseDays - ws.relapse.n) : 0;
+      const fc = C.forecast(ws.avg, tp, C.T.p1to3, d);
+      m.when = m.left > 0 && fc && fc.date ? `≈ ${mon(fc.date)}` : '';
+      m.frac = a0 > C.T.p1to3 ? (a0 - ws.avg) / (a0 - C.T.p1to3) : 1;
+    } else if (ws.phase === 3 && ws.daily.length) m.buffer = C.T.relapse - ws.daily[ws.daily.length - 1].kg;
+    return m;
+  }
+  const CHECK = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+
   function viewHeute() {
     const d = today(), pd = C.parseDay(d);
     const ws = C.weightStatus(S.weights, d);
+    const active = S.habits.filter(h => !h.archived);
+    const stats = active.map(h => C.habitStats(S, h, d));
+    const done = stats.filter(st => st.days.has(d)).length;
     let out = `<div class="ph"><h1>${DAYS[pd.getDay()]}</h1><span class="meta num">${pd.getDate()}. ${MONTHS[pd.getMonth()]}</span></div>`;
     for (const [i, n] of (S.notices || []).entries()) out += `<div class="notice good row"><span class="grow">${esc(n)}</span><button class="btn sm ghost" data-act="dismiss" data-arg="${i}">OK</button></div>`;
     const running = S.sessions.find(s => s.kind === 'training' && !s.done);
     if (running) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="session:${running.id}"><span class="grow">Einheit #${String(running.num).padStart(3, '0')} läuft</span><b>›</b></button>`;
-    if (ws.due) out += `<div class="card"><div class="entry"><input type="text" inputmode="decimal" placeholder="Gewicht heute, kg" id="quickKg" aria-label="Gewicht in kg"><button class="btn primary" data-act="quickWeight" aria-label="Gewicht speichern">✓</button></div></div>`;
+    if (active.length) out += `<div class="hero-b">${ring(done / active.length, 64, 8, 'var(--accent)', done === active.length ? CHECK : '')}<div><div class="hero-num num">${done} von ${active.length}</div><div class="hero-sub">heute erledigt</div></div></div>`;
+    if (ws.due) out += `<div class="entry-b"><input type="text" inputmode="decimal" placeholder="Gewicht heute, kg" id="quickKg" aria-label="Gewicht in kg"><button class="fab" data-act="quickWeight" aria-label="Gewicht speichern">${CHECK}</button></div>`;
     if (S.settings.heightCm && C.measurementDue(S.measurements, d)) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="measure"><span class="grow">Umfänge messen</span><b>›</b></button>`;
     out += goalsMini(d);
-    const active = S.habits.filter(h => !h.archived);
     if (!active.length) out += `<div class="card"><button class="btn primary block" data-act="open" data-arg="habitEdit">Erste Gewohnheit anlegen</button></div>`;
-    else out += `<div class="hlist"><div class="hhead"><span></span><div class="wd">${WD.map(w => `<span class="lbl">${w}</span>`).join('')}</div><span class="lbl">Serie</span></div>${active.map(habitRow).join('')}</div>`;
+    else out += `<div class="tiles">${active.map((h, i) => habitTile(h, stats[i], d)).join('')}</div>`;
     return out;
   }
-  function habitRow(h) {
-    const d = today(), st = C.habitStats(S, h, d), ws = C.weekStart(d);
-    const on = st.days.has(d);
-    const dots = WD.map((_, i) => {
-      const day = C.addDays(ws, i); const fut = day > d, before = day < h.start;
-      const cls = ['dot', st.days.has(day) ? 'on' : '', day === d ? 'today' : '', fut ? 'future' : '', before ? 'before' : ''].join(' ');
-      const dis = fut || before || h.link === 'sport';
-      return `<button class="${cls}" ${dis ? 'disabled' : ''} data-act="toggle" data-arg="${h.id}:${day}" aria-label="${day}${st.days.has(day) ? ' erledigt' : ''}"></button>`;
-    }).join('');
-    const weekly = h.type === 'weekly';
-    return `<div class="hrow" style="--hc:${h.color}">
-      <button class="hab-ico ${on ? 'on' : ''}" data-act="${h.link === 'sport' ? 'sportSheet' : 'toggle'}" data-arg="${h.id}:${d}" aria-label="${esc(h.name)} heute abhaken">${esc(h.emoji)}</button>
-      <div><button class="hab-name" data-act="open" data-arg="habit:${h.id}">${esc(h.name)}${weekly ? ` <span class="faint num">${st.week.n}/${st.week.t}</span>` : ''}</button><div class="dots">${dots}</div></div>
-      <div class="streak num"><b>${st.cur}</b><span>${weekly ? 'Wo.' : 'Tage'}</span></div></div>`;
+  function habitTile(h, st, d) {
+    const ws = C.weekStart(d), on = st.days.has(d), weekly = h.type === 'weekly';
+    const bars = WD.map((w, i) => { const day = C.addDays(ws, i); return `<i class="${st.days.has(day) ? 'on' : ''} ${day === d ? 'today' : ''} ${day > d || day < h.start ? 'off' : ''}" title="${w}"></i>`; }).join('');
+    return `<div class="tile ${on ? 'done' : ''}" style="--hc:${h.color}">
+      <div class="tile-top"><span class="tile-emo">${esc(h.emoji)}</span>
+      <button class="tick ${on ? 'on' : ''}" data-act="${h.link === 'sport' ? 'sportSheet' : 'toggle'}" data-arg="${h.id}:${d}" aria-label="${esc(h.name)} heute abhaken" aria-pressed="${on}">${CHECK}</button></div>
+      <button class="tile-body" data-act="open" data-arg="habit:${h.id}"><span class="tile-name">${esc(h.name)}</span>
+      <span class="tile-streak num"><b>${st.cur}</b> ${weekly ? (st.cur === 1 ? 'Woche' : 'Wochen') : (st.cur === 1 ? 'Tag' : 'Tage')}${weekly ? ` · ${st.week.n}/${st.week.t}` : ''}</span>
+      <span class="wbar">${bars}</span></button></div>`;
   }
 
   // ===== GEWOHNHEIT DETAIL =====
@@ -404,33 +423,19 @@
   function viewGewicht() {
     const d = today(), ws = C.weightStatus(S.weights, d);
     const ms = [...S.measurements].sort((a, b) => a.t.localeCompare(b.t)), lastNavy = ms[ms.length - 1];
-    const tp = C.tempo(ws.daily, d);
-    const mon = s => `${MONTHS[C.parseDay(s).getMonth()].slice(0, 3)} ${s.slice(2, 4)}`;
-    let track = '';
-    if (ws.phase === 1 && ws.avg !== null) {
-      const sw = [...ws.switches].reverse().find(s => s.to === 1);
-      const a0 = Math.max(C.avg30(ws.daily, sw ? sw.d : ws.daily[0].d), ws.avg);
-      const left = ws.avg - C.T.p1to3, rl = ws.relapse ? Math.max(0, C.T.relapseDays - ws.relapse.n) : 0;
-      const fc = C.forecast(ws.avg, tp, C.T.p1to3, d);
-      const frac = a0 > C.T.p1to3 ? (a0 - ws.avg) / (a0 - C.T.p1to3) : 1;
-      const right = [left > 0 ? `noch ${C.fmt(left)} kg` : '', rl ? `noch ${rl} Wiegetage` : '', left > 0 && fc && fc.date ? `≈ ${mon(fc.date)}` : ''].filter(Boolean).join(' · ') || 'erreicht';
-      track = `<div class="track">${bar(frac, null, 'var(--sage)')}<div class="row between"><span>monatlich ab ${C.fmt(C.T.p1to3)}</span><span class="num">${right}</span></div></div>`;
-    } else if (ws.phase === 3) {
-      const last = ws.daily[ws.daily.length - 1];
-      track = `<div class="track"><div class="row between"><span>Grenze ${C.fmt(C.T.relapse)} kg</span><span class="num">Puffer ${C.fmt(C.T.relapse - last.kg)} kg</span></div></div>`;
-    }
+    const tp = C.tempo(ws.daily, d), m = weightModel(ws, tp, d);
     const fat = lastNavy && lastNavy.fat !== null && lastNavy.fat !== undefined ? `${C.fmt(lastNavy.fat)} %` : '–';
+    const chips = [tp === null ? '' : `<span class="chip-b num">${tp > 0 ? '↑' : '↓'} ${C.fmt(Math.abs(tp), 2)} kg/Wo</span>`,
+      m.phase === 1 ? `<span class="chip-b num">${m.left > 0 ? `noch ${C.fmt(m.left)} kg` : (m.rl ? `noch ${m.rl} Wiegetage` : 'Ziel erreicht')}${m.when ? ' · ' + m.when : ''}</span>` : `<span class="chip-b num">Puffer ${C.fmt(m.buffer)} kg</span>`].join('');
     return `<div class="ph"><h1>Gewicht</h1><div class="meta"><span class="pill ${ws.due ? 'due' : ''}">${ws.phase === 1 ? 'täglich' : 'monatlich'}${ws.due ? ' · fällig' : ''}</span><button class="info" data-act="sheet" data-arg="infoWeight" aria-label="Erklärung">${INFO}</button></div></div>
-      <div class="card"><div class="hero"><div><div class="lbl">Ø 30 Tage</div><div class="big num">${C.fmt(ws.avg)}<span>kg</span></div></div>
-      ${tp === null ? '' : `<div class="trend num"><b>${tp > 0 ? '↑' : '↓'} ${C.fmt(Math.abs(tp), 2)}</b>kg / Woche</div>`}</div>${track}</div>
-      <div class="card"><div class="entry"><input type="text" inputmode="decimal" placeholder="kg" id="wKg" aria-label="Gewicht in kg"><button class="iconbtn" data-act="toggleWhen" aria-label="Anderer Zeitpunkt">${CLOCK}</button><button class="btn primary" data-act="addWeight" aria-label="Gewicht speichern">✓</button></div>
-      <input type="datetime-local" id="wWhen" hidden style="margin-top:10px" value="${C.nowLocal()}"></div>
-      <div class="row between" style="margin:24px 0 0"><h2 style="margin:0">Verlauf</h2><div class="seg">${['1M', '3M', '6M', '1J'].map(r => `<button aria-pressed="${rangeFor(ws) === r}" data-act="range" data-arg="${r}">${r}</button>`).join('')}</div></div>
-      ${chart(ws, d)}
-      <h2>Körperfett</h2>
-      <div class="card"><div class="kfa"><div class="grow"><b class="num">${fat}</b> <span class="faint small num">${lastNavy ? dShort(lastNavy.t) : 'noch nicht gemessen'}</span></div><button class="btn sm" data-act="open" data-arg="measure">Messen</button></div>${kfaChart(ms.filter(m => m.fat !== null && m.fat !== undefined))}</div>
-      <h2>Einträge</h2><div class="wlist num">${[...S.weights].sort((a, b) => b.t.localeCompare(a.t)).slice(0, 5).map(w => `<div class="r"><span>${dShort(w.t)} <span class="faint small">${w.t.slice(11, 16)}</span></span><b>${C.fmt(w.kg)} kg</b></div>`).join('')}</div>
-      <button class="linkbtn" data-act="open" data-arg="weights">Alle ${S.weights.length} Einträge ›</button>`;
+      <div class="card hero-w">${ring(m.phase === 1 ? m.frac : 1, 188, 14, 'var(--accent)', `<span class="lbl">Ø 30 Tage</span><b class="num">${C.fmt(ws.avg)}</b><span class="unit">kg</span>`)}
+      <div class="ring-cap">${m.phase === 1 ? `Phase 2 (monatlich) ab ${C.fmt(C.T.p1to3)} kg` : `Grenze ${C.fmt(C.T.relapse)} kg`}</div><div class="chips-b">${chips}</div></div>
+      <div class="entry-b"><input type="text" inputmode="decimal" placeholder="Gewicht, kg" id="wKg" aria-label="Gewicht in kg"><button class="iconbtn lg" data-act="toggleWhen" aria-label="Anderer Zeitpunkt">${CLOCK}</button><button class="fab" data-act="addWeight" aria-label="Gewicht speichern">${CHECK}</button></div>
+      <input type="datetime-local" id="wWhen" hidden style="margin:-4px 0 12px" value="${C.nowLocal()}">
+      <div class="card"><div class="row between"><h2 style="margin:0">Verlauf</h2><div class="seg">${['1M', '3M', '6M', '1J'].map(r => `<button aria-pressed="${rangeFor(ws) === r}" data-act="range" data-arg="${r}">${r}</button>`).join('')}</div></div>
+      ${chart(ws, d)}</div>
+      <div class="duo"><button class="card tilebtn" data-act="open" data-arg="measure"><span class="lbl">Körperfett</span><b class="num">${fat}</b><span class="faint small num">${lastNavy ? dShort(lastNavy.t) : 'messen'}</span></button>
+      <button class="card tilebtn" data-act="open" data-arg="weights"><span class="lbl">Einträge</span><b class="num">${S.weights.length}</b><span class="faint small num">zuletzt ${ws.lastDay ? dShort(ws.lastDay).slice(3) : '–'}</span></button></div>`;
   }
   function kfaChart(ms) {
     if (ms.length < 2) return '';
