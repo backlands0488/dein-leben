@@ -280,3 +280,48 @@ h1{font-size:30px;font-weight:700}
 .seg button[aria-pressed=true]{background:var(--accent);color:var(--on-accent)}
 nav.tabs button[aria-current=page]{background:var(--pc);color:var(--on-pc)}
 .pill{background:var(--s2)}
+
+/* ---------- Fokus: übrige Seiten ---------- */
+.btn.xl{min-height:56px;font-size:16px}
+.pills{display:flex;gap:6px;flex-wrap:wrap}
+.lbl.mon{margin:22px 0 8px 4px}
+.wlist .r{display:flex}
+.srow{display:flex;align-items:center;gap:12px;width:100%;min-height:60px;padding:10px 0;border:0;border-top:1px solid var(--line);background:transparent;text-align:left}
+.wlist>.srow:first-child,.wlist>.r:first-child{border-top:0}
+.srow b{font-weight:600}
+.sn{width:40px;height:40px;border-radius:14px;display:grid;place-items:center;background:var(--s2);font-weight:700;font-size:var(--f-s);flex:none}
+.sn.mv{background:color-mix(in srgb,var(--sage) 25%,var(--s2));font-size:18px}
+.cats{display:flex;align-items:center;flex-wrap:wrap;gap:2px 10px;font-size:var(--f-s);color:var(--mu);margin-top:3px}
+.ct{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.cats i,.cdot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--c)}
+.cdot{margin-right:5px;vertical-align:1px}
+.chev{color:var(--fa);font-size:20px;padding:0 4px}
+.tilebtn.act{min-height:112px}
+.tilebtn.act b{font-size:var(--f-m);font-weight:650;margin-top:6px}
+.tilebtn.act .tile-emo{width:44px;height:44px;border-radius:14px;font-size:22px;background:color-mix(in srgb,var(--hc) 25%,var(--s2))}
+.goal-b{display:flex;align-items:center;gap:16px}
+.goal-b h3{font-size:var(--f-m);margin:0 0 4px}
+.gval{font-size:26px;font-weight:700;letter-spacing:-.02em;line-height:1.1}
+.gval span{font-size:var(--f-m);color:var(--mu);font-weight:600}
+.gsub{font-size:var(--f-s);color:var(--mu);margin-top:4px}
+.goal-b .ring-in b{font-size:var(--f-m)}
+.top{padding:10px 0 12px}
+.top .info,.top .iconbtn{flex:none}
+.top .iconbtn{width:48px;height:48px;background:var(--s1)}
+.top .iconbtn[data-act=back]{font-size:26px}
+.stat{background:var(--s1);border-radius:var(--rs)}
+.ex{border-radius:var(--r)}
+.badge{display:inline-flex;align-items:center;background:var(--s2)}
+.pick{min-height:52px}
+nav.tabs button{gap:3px}
+nav.tabs button .ic{display:grid;place-items:center;height:26px}
+nav.tabs button[aria-current=page] svg{stroke-width:2.2}
+.sheet{border-radius:28px 28px 0 0}
+.sheet .btn{border-radius:999px}
+input[type=text],input[type=number],input[type=date],input[type=datetime-local],select,textarea{border-radius:14px}
+.cal button{min-height:40px}
+/* Tippflächen mindestens 44 px (Apple) bzw. nahe 48 dp (Google) */
+.info{width:44px;height:44px;margin:-6px -8px -6px 0}
+.seg button{min-height:44px;min-width:48px}
+.seg.wide button{min-height:44px}
+.linkbtn{min-height:48px}
