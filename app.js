@@ -633,7 +633,7 @@
       <div class="opt"><label class="lbl" for="wLines">Markierungen in kg</label><input type="text" id="wLines" inputmode="decimal" value="${weightLines().map(C.fmtW).join(' ')}" data-change="weightLines" placeholder="z. B. 99 92 88"></div>
       <div class="opt"><label class="lbl" for="hCm">Körpergröße in cm</label><input type="text" id="hCm" inputmode="decimal" value="${S.settings.heightCm || ''}" data-change="height" placeholder="cm"></div></div>
       <p class="faint small" id="persist" style="margin:18px 0 4px">…</p>
-      <p class="faint small" style="margin:0">Dein Leben 2.4.0</p>`;
+      <p class="faint small" style="margin:0">Dein Leben 2.4.1</p>`;
   }
   const DEFAULTS = { fontScale: 'normal', heuteView: 'tiles', trainStart: 'ask', weightRange: 'auto', backupDays: 7 };
   const iconOf = k => `<span class="sn"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg></span>`;
