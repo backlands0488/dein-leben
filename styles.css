@@ -281,6 +281,56 @@ h1{font-size:30px;font-weight:700}
 nav.tabs button[aria-current=page]{background:var(--pc);color:var(--on-pc)}
 .pill{background:var(--s2)}
 
+/* ---------- Stoppuhr ---------- */
+.sets.tm .set,.sets.tm .set-head{grid-template-columns:24px repeat(var(--cols),1fr) 64px 36px}
+.swt{height:44px;border-radius:14px;border:0;background:var(--s2);color:var(--accent);display:grid;place-items:center;padding:0;font-weight:700;font-size:var(--f-m)}
+.swt.run{background:var(--accent);color:var(--on-accent)}
+/* ---------- „Heute“ gestalten ---------- */
+.tile.done{background:var(--s1)}
+.tint .tile.done{background:color-mix(in srgb,var(--hc) 22%,var(--s1))}
+.tint .hl.done{background:color-mix(in srgb,var(--hc) 16%,transparent);border-radius:14px;padding-left:8px;padding-right:8px;border-top-color:transparent}
+.tint .hl.done+.hl{border-top-color:transparent}
+.wbar .c{display:flex;flex-direction:column;align-items:stretch;gap:3px}
+.wbar em{font-style:normal;font-size:9px;line-height:1;color:var(--fa);text-align:center}
+.wbar em.now{color:var(--hc);font-weight:700}
+.wbar.square,.wbar.circle{gap:4px}
+.wbar.square i,.wbar.circle i{height:auto;aspect-ratio:1;width:100%;max-width:26px;justify-self:center;border-radius:6px;display:grid;place-items:center;font-style:normal;font-size:9px;font-weight:600;color:var(--mu);line-height:1}
+.wbar.circle i{border-radius:50%}
+.wbar i.on{color:#10140F}
+.wbar i svg{width:62%;height:62%}
+.hl .wbar.square,.hl .wbar.circle{max-width:200px}
+.years{display:grid;gap:10px}
+.tile.yr{gap:12px}
+.ygrid{width:100%;height:auto;display:block}
+.ygrid .now{stroke:var(--hc);stroke-width:1.5}
+.yr-row{display:flex;align-items:center;gap:10px}
+.yr-row .tile-emo{width:44px;height:44px;border-radius:14px;font-size:22px;flex:none}
+.preview{margin:0 0 6px}
+.preview .card{margin:0}
+.tick.pop{animation:tickpop .42s cubic-bezier(.3,1.6,.5,1)}
+.tick.pop::after{content:"";position:absolute;inset:-2px;border-radius:50%;border:2px solid var(--hc);animation:tickring .5s ease-out forwards;pointer-events:none}
+.tick{position:relative}
+@keyframes tickpop{0%{transform:scale(.7)}60%{transform:scale(1.18)}100%{transform:scale(1)}}
+@keyframes tickring{0%{transform:scale(1);opacity:.9}100%{transform:scale(1.9);opacity:0}}
+@media (prefers-reduced-motion:reduce){.tick.pop,.tick.pop::after{animation:none}}
+/* ---------- Körperwerte und Statistik ---------- */
+.trio .tilebtn:not(.act) b{font-size:22px}
+.seg.rng{margin:0 0 6px}
+.seg.rng button{padding-left:0;padding-right:0}
+.kv{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
+.lbl+.kv{border-top:0}
+.kv>span{color:var(--mu)}
+.kv b{font-weight:650}
+.kv b.good{color:var(--sage)}
+.kv b.bad{color:var(--danger)}
+.scale{margin:10px 0 6px}
+.sbar{position:relative;height:10px;border-radius:5px;overflow:visible}
+.sbar i{position:absolute;top:0;height:10px}
+.sbar i:first-child{border-radius:5px 0 0 5px}
+.sbar i:last-of-type{border-radius:0 5px 5px 0}
+.sbar b{position:absolute;top:-5px;width:4px;height:20px;margin-left:-2px;border-radius:2px;background:var(--tx);box-shadow:0 0 0 2px var(--s1)}
+.sticks{position:relative;height:16px;font-size:var(--f-xs);color:var(--fa)}
+.sticks span{position:absolute;transform:translateX(-50%);top:3px}
 /* ---------- Fokus: übrige Seiten ---------- */
 .btn.xl{min-height:56px;font-size:16px}
 .pills{display:flex;gap:6px;flex-wrap:wrap}
@@ -361,4 +411,4 @@ input.sw:checked::after{transform:translateX(20px);background:var(--on-accent)}
 .hl .wbar{max-width:170px;margin-top:4px}
 .hl .tick{width:44px;height:44px;flex:none}
 /* Große Schrift: alles innerhalb der Seiten wird gleichmäßig größer */
-:root[data-font=l] main,:root[data-font=l] nav.tabs,:root[data-font=l] .sheet,:root[data-font=l] #toast{zoom:1.15}
+

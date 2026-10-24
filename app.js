@@ -25,10 +25,16 @@
   // Akzentfarben je Farbschema: [Akzent, Schrift auf Akzent, Fläche, Schrift auf Fläche]. Minze = Standard aus styles.css
   const ACCENTS = {
     mint: ['Minze', '#86D7C0', null],
+    tuerkis: ['Türkis', '#7FD6E6', { dark: ['#7FD6E6', '#00363F', '#173C44', '#C4F1FA'], dim: ['#8CDCEA', '#00363F', '#2E5560', '#CFF4FB'], light: ['#00687A', '#FFFFFF', '#C4ECF4', '#001F26'] }],
     blau: ['Blau', '#8EC5FF', { dark: ['#8EC5FF', '#00325A', '#16324C', '#CDE5FF'], dim: ['#9CCBFF', '#00325A', '#2E4A63', '#D6EAFF'], light: ['#1F5FA8', '#FFFFFF', '#D3E4FF', '#001C3A'] }],
+    indigo: ['Indigo', '#B3BCFF', { dark: ['#B3BCFF', '#1A2266', '#262C50', '#DEE1FF'], dim: ['#BCC4FF', '#1A2266', '#40466B', '#E3E6FF'], light: ['#4A55A8', '#FFFFFF', '#DEE1FF', '#0A1250'] }],
     violett: ['Violett', '#C9B3FF', { dark: ['#C9B3FF', '#2E1A63', '#30264F', '#E6DEFF'], dim: ['#CFBCFF', '#2E1A63', '#4A3E6B', '#EBE3FF'], light: ['#6A4FB3', '#FFFFFF', '#E6DEFF', '#22104F'] }],
     rose: ['Rosé', '#F4A8CF', { dark: ['#F4A8CF', '#5B1140', '#4A2440', '#FFD8EA'], dim: ['#F6B3D5', '#5B1140', '#63405A', '#FFE0EF'], light: ['#A2386F', '#FFFFFF', '#FFD8EA', '#3A0024'] }],
+    himbeere: ['Himbeere', '#FFA8B8', { dark: ['#FFA8B8', '#5E0F26', '#4C2530', '#FFD9E0'], dim: ['#FFB3C1', '#5E0F26', '#653F49', '#FFE0E6'], light: ['#B0284E', '#FFFFFF', '#FFD9E0', '#3F0016'] }],
+    koralle: ['Koralle', '#FFB4A2', { dark: ['#FFB4A2', '#5C1A0D', '#4A2620', '#FFDAD2'], dim: ['#FFBDAD', '#5C1A0D', '#64403A', '#FFE1D9'], light: ['#A63A22', '#FFFFFF', '#FFDAD2', '#3B0A00'] }],
+    bernstein: ['Bernstein', '#F2C46D', { dark: ['#F2C46D', '#3F2E00', '#40331A', '#FFE3A8'], dim: ['#F5CB7E', '#3F2E00', '#5A4C30', '#FFE8B8'], light: ['#7A5A00', '#FFFFFF', '#FFE3A8', '#261A00'] }],
     limette: ['Limette', '#C3DC72', { dark: ['#C3DC72', '#2C3A00', '#33401A', '#E1F5A6'], dim: ['#CBE17F', '#2C3A00', '#4C5A30', '#E7F8B4'], light: ['#4F6A00', '#FFFFFF', '#D9EDA0', '#162000'] }],
+    sand: ['Sand', '#D9C3A5', { dark: ['#D9C3A5', '#3A2C17', '#3B3328', '#F2E2CC'], dim: ['#DFCBAE', '#3A2C17', '#554B3E', '#F5E7D3'], light: ['#6B5638', '#FFFFFF', '#EDE0CC', '#231A0B'] }],
     graphit: ['Graphit', '#E1E8E5', { dark: ['#E1E8E5', '#18201E', '#2D3734', '#E1E8E5'], dim: ['#E4ECE9', '#252D2B', '#4A5552', '#E4ECE9'], light: ['#2A3330', '#FFFFFF', '#DCE5E2', '#0F1C19'] }]
   };
   const TAB_LABELS = { heute: 'Heute', ziele: 'Ziele', training: 'Training', gewicht: 'Gewicht', mehr: 'Mehr' };
@@ -43,7 +49,7 @@
   function tabOrder() { const h = tabHidden(); return tabOrderAll().filter(k => !h.includes(k)); }
   // Einstellungen mit Standardwert
   const setting = (k, def) => (S && S.settings && S.settings[k] !== undefined && S.settings[k] !== null ? S.settings[k] : def);
-  const SETTABLE = { fontScale: ['normal', 'large'], heuteView: ['tiles', 'list'], trainStart: ['ask', 'repeat', 'empty'], weightRange: ['auto', '1M', '3M', '6M', '1J'], backupDays: [1, 3, 7, 14, 30] };
+  const SETTABLE = { heuteView: ['tiles', 'list', 'year'], dotShape: ['bar', 'square', 'circle'], dotLabel: ['none', 'wd', 'date'], trainStart: ['ask', 'repeat', 'empty'], weightRange: ['auto', '7T', '1M', '3M', '6M', '1J', 'Alles'], backupDays: [1, 3, 7, 14, 30] };
   const WEIGHT_LINES = [99, 92, 88, 85];
   const weightLines = () => { const l = setting('weightLines', WEIGHT_LINES); return Array.isArray(l) ? l.filter(v => typeof v === 'number' && v >= 30 && v <= 300) : WEIGHT_LINES; };
   const backupDays = () => { const v = Number(setting('backupDays', 7)); return SETTABLE.backupDays.includes(v) ? v : 7; };
@@ -54,6 +60,9 @@
     return act.sort((a, b) => pos(a) - pos(b));
   }
   const inRing = h => !setting('ringExclude', []).includes(h.id);
+  // Schalter mit Standardwert; „aufgeräumt“ = alles aus bis auf die Tönung
+  const FLAGS = { dotCheck: false, tintDone: true, anim: true, confirmBackfill: true };
+  const flag = k => setting(k, FLAGS[k]) === true;
   // Trainingskategorien: eigene Liste mit Farben; Kategorien aus Übungen, die (noch) fehlen, werden grau ergänzt
   const CAT_DEFAULT = C.CATS.map(n => ({ name: n, color: CATCOL[n] }));
   const CAT_COLORS = ['#E5806F', '#7FA6D6', '#8FB3A0', '#E3B66F', '#C9A9DD', '#B8C27A', '#F4A8CF', '#86D7C0', '#C49A80', '#9AA8A3'];
@@ -67,7 +76,6 @@
   function applyTheme() {
     const t = (S && S.settings && S.settings.theme) || 'dark';
     document.documentElement.dataset.theme = t;
-    if (setting('fontScale', 'normal') === 'large') document.documentElement.dataset.font = 'l'; else delete document.documentElement.dataset.font;
     const ac = ACCENTS[S && S.settings && S.settings.accent], st = document.documentElement.style;
     const props = ['--accent', '--on-accent', '--pc', '--on-pc', '--sage', '--good-bg', '--good-tx'];
     if (!ac || !ac[2]) props.forEach(p => st.removeProperty(p));
@@ -78,6 +86,10 @@
   let S = load();
   const ui = { tab: tabOrder()[0], stack: [], sheet: null, range: null, cal: {}, metric: {}, scroll: {} };
   // Standard: 1 Monat, solange der 30-Tage-Ø über 92 kg liegt, sonst 3 Monate
+  const RANGES = ['7T', '1M', '3M', '6M', '1J', 'Alles'];
+  const RANGE_DAYS = { '7T': 7, '1M': 30, '3M': 91, '6M': 182, '1J': 365 };
+  // Beginn eines Zeitraums; „Alles“ beginnt beim ersten Wiegetag
+  const rangeFrom = (r, ws, d) => r === 'Alles' ? (ws.daily.length ? ws.daily[0].d : d) : C.addDays(d, -(RANGE_DAYS[r] || 30));
   const rangeFor = ws => ui.range || (setting('weightRange', 'auto') !== 'auto' ? setting('weightRange', 'auto') : (ws.avg !== null && ws.avg <= 92 ? '3M' : '1M'));
 
   // ---------- Speicher ----------
@@ -131,6 +143,7 @@
     document.body.classList.toggle('paged', !t);
     $app.innerHTML = html;
     if (!t) restoreScroll();
+    if (ui.pop) { document.querySelectorAll(`[data-arg="${ui.pop}"]`).forEach(el => el.classList.add('pop')); ui.pop = null; }
     const ps = document.getElementById('persist');
     if (ps && navigator.storage && navigator.storage.persisted) navigator.storage.persisted().then(p => { ps.textContent = p ? 'Speicher dauerhaft ✓' : 'Speicher nicht dauerhaft bestätigt · Backups wichtig'; });
     else if (ps) ps.textContent = '';
@@ -209,8 +222,9 @@
     if (ws.due) out += `<div class="entry-b"><input type="text" inputmode="decimal" placeholder="Gewicht heute, kg" id="quickKg" aria-label="Gewicht in kg"><button class="fab" data-act="quickWeight" aria-label="Gewicht speichern">${CHECK}</button></div>`;
     if (S.settings.heightCm && C.measurementDue(S.measurements, d)) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="measure"><span class="grow">Umfänge messen</span><b>›</b></button>`;
     if (!active.length) out += `<div class="card"><button class="btn primary block" data-act="open" data-arg="habitEdit">Erste Gewohnheit anlegen</button></div>`;
-    else if (setting('heuteView', 'tiles') === 'list') out += `<div class="hlist2">${active.map((h, i) => habitRow(h, stats[i], d)).join('')}</div>`;
-    else out += `<div class="tiles">${active.map((h, i) => habitTile(h, stats[i], d)).join('')}</div>`;
+    else if (setting('heuteView', 'tiles') === 'list') out += `<div class="hlist2 ${flag('tintDone') ? 'tint' : ''}">${active.map((h, i) => habitRow(h, stats[i], d)).join('')}</div>`;
+    else if (setting('heuteView', 'tiles') === 'year') out += `<div class="years ${flag('tintDone') ? 'tint' : ''}">${active.map((h, i) => habitYear(h, stats[i], d)).join('')}</div>`;
+    else out += `<div class="tiles ${flag('tintDone') ? 'tint' : ''}">${active.map((h, i) => habitTile(h, stats[i], d)).join('')}</div>`;
     return out;
   }
   // Wochenring: alle Abhak-Möglichkeiten von Mo bis So.
@@ -233,9 +247,34 @@
     });
     return { P, D, E };
   }
+  // Tagespunkte der Woche: Form, Beschriftung und Häkchen nach Einstellung
   function weekBars(h, st, d) {
-    const ws = C.weekStart(d);
-    return WD.map((w, i) => { const day = C.addDays(ws, i); return `<i class="${st.days.has(day) ? 'on' : ''} ${day === d ? 'today' : ''} ${day > d || day < h.start ? 'off' : ''}" title="${w}"></i>`; }).join('');
+    const ws = C.weekStart(d), shape = setting('dotShape', 'bar'), lab = setting('dotLabel', 'none'), chk = shape !== 'bar' && flag('dotCheck');
+    return `<span class="wbar ${shape}">${WD.map((w, i) => {
+      const day = C.addDays(ws, i), on = st.days.has(day), txt = lab === 'wd' ? w : lab === 'date' ? Number(day.slice(8)) : '';
+      const cls = `${on ? 'on' : ''} ${day === d ? 'today' : ''} ${day > d || day < h.start ? 'off' : ''}`;
+      if (shape === 'bar') return txt ? `<span class="c"><i class="${cls}"></i><em class="${day === d ? 'now' : ''}">${txt}</em></span>` : `<i class="${cls}" title="${w}"></i>`;
+      return `<i class="${cls}" title="${w}">${on && chk ? CHECK_SM : txt}</i>`;
+    }).join('')}</span>`;
+  }
+  const CHECK_SM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+  // Jahresansicht: die letzten 26 Wochen als Raster, Spalten = Wochen, Zeilen = Mo bis So
+  const YEAR_WEEKS = 26;
+  function yearGrid(h, st, d) {
+    const first = C.addDays(C.weekStart(d), -7 * (YEAR_WEEKS - 1)), cell = 10, gap = 3, r = setting('dotShape', 'bar') === 'circle' ? 5 : 2.5;
+    let rects = '';
+    for (let w = 0; w < YEAR_WEEKS; w++) for (let i = 0; i < 7; i++) {
+      const day = C.addDays(first, w * 7 + i); if (day > d) continue;
+      const x = w * (cell + gap), y = i * (cell + gap), on = st.days.has(day), pre = day < h.start;
+      rects += `<rect x="${x}" y="${y}" width="${cell}" height="${cell}" rx="${r}" style="fill:${on ? 'var(--hc)' : 'var(--s3)'}${pre ? ';opacity:.35' : ''}"${day === d ? ' class="now"' : ''}/>`;
+    }
+    return `<svg class="ygrid" viewBox="-1.5 -1.5 ${YEAR_WEEKS * (cell + gap) - gap + 3} ${7 * (cell + gap) - gap + 3}" role="img" aria-label="${esc(h.name)}: letzte ${YEAR_WEEKS} Wochen">${rects}</svg>`;
+  }
+  function habitYear(h, st, d) {
+    const on = st.days.has(d);
+    return `<div class="tile yr ${on ? 'done' : ''}" style="--hc:${h.color}">${yearGrid(h, st, d)}
+      <div class="yr-row"><button class="hl-main" data-act="open" data-arg="habit:${h.id}"><span class="tile-emo">${esc(h.emoji)}</span>
+      <span class="hl-txt"><span class="tile-name">${esc(h.name)}</span><span class="tile-streak num">${streakTxt(h, st)}</span></span></button>${tickBtn(h, on, d)}</div></div>`;
   }
   function streakTxt(h, st) {
     const weekly = h.type === 'weekly';
@@ -248,13 +287,13 @@
       <div class="tile-top"><span class="tile-emo">${esc(h.emoji)}</span>${tickBtn(h, on, d)}</div>
       <button class="tile-body" data-act="open" data-arg="habit:${h.id}"><span class="tile-name">${esc(h.name)}</span>
       <span class="tile-streak num">${streakTxt(h, st)}</span>
-      <span class="wbar">${weekBars(h, st, d)}</span></button></div>`;
+      ${weekBars(h, st, d)}</button></div>`;
   }
   function habitRow(h, st, d) {
     const on = st.days.has(d);
     return `<div class="hl ${on ? 'done' : ''}" style="--hc:${h.color}">
       <button class="hl-main" data-act="open" data-arg="habit:${h.id}"><span class="tile-emo">${esc(h.emoji)}</span>
-      <span class="hl-txt"><span class="tile-name">${esc(h.name)}</span><span class="tile-streak num">${streakTxt(h, st)}</span><span class="wbar">${weekBars(h, st, d)}</span></span></button>
+      <span class="hl-txt"><span class="tile-name">${esc(h.name)}</span><span class="tile-streak num">${streakTxt(h, st)}</span>${weekBars(h, st, d)}</span></button>
       ${tickBtn(h, on, d)}</div>`;
   }
 
@@ -377,7 +416,7 @@
   }
   const FIELDS = {
     weight: [['w', 'kg'], ['r', 'Wdh.']], assist: [['w', 'Hilfe kg'], ['r', 'Wdh.']], reps: [['r', 'Wdh.']],
-    time: [['s', 'Sek.']], cardio: [['min', 'Min.'], ['kmh', 'km/h'], ['incl', 'Steig.'], ['km', 'km']], sled: [['w', 'kg'], ['m', 'Meter']]
+    time: [['s', 'Sek.']], wtime: [['w', 'kg'], ['s', 'Sek.']], cardio: [['min', 'Min.'], ['kmh', 'km/h'], ['incl', 'Steig.'], ['km', 'km']], sled: [['w', 'kg'], ['m', 'Meter']]
   };
   function screenSession({ id }) {
     const s = S.sessions.find(x => x.id === id); if (!s) return header('Nicht gefunden');
@@ -399,9 +438,9 @@
     if (ex.type === 'done') {
       body = `<label class="check" style="margin:12px 0"><input type="checkbox" ${it.done ? 'checked' : ''} data-change="itemDone" data-arg="${s.id}:${idx}"> Erledigt</label>`;
     } else {
-      const f = FIELDS[ex.type] || FIELDS.weight;
-      body = `<div class="sets" style="--cols:${f.length}"><div class="set-head"><span>#</span>${f.map(x => `<span>${x[1]}</span>`).join('')}<span></span></div>` +
-        it.sets.map((st, si) => `<div class="set"><span class="i">${si + 1}</span>${f.map(([k, l]) => `<input type="text" inputmode="${k === 'incl' ? 'text' : 'decimal'}" aria-label="${l} Satz ${si + 1}" value="${st[k] === null || st[k] === undefined ? '' : esc(String(ex.type === 'assist' && k === 'w' ? Math.abs(st[k]) : st[k]).replace('.', ','))}" data-input="set" data-arg="${s.id}:${idx}:${si}:${k}">`).join('')}<button class="x" data-act="delSet" data-arg="${s.id}:${idx}:${si}" aria-label="Satz löschen">×</button></div>`).join('') +
+      const f = FIELDS[ex.type] || FIELDS.weight, timed = ex.type === 'time' || ex.type === 'wtime';
+      body = `<div class="sets ${timed ? 'tm' : ''}" style="--cols:${f.length}"><div class="set-head"><span>#</span>${f.map(x => `<span>${x[1]}</span>`).join('')}${timed ? '<span></span>' : ''}<span></span></div>` +
+        it.sets.map((st, si) => `<div class="set"><span class="i">${si + 1}</span>${f.map(([k, l]) => `<input type="text" inputmode="${k === 'incl' ? 'text' : 'decimal'}" aria-label="${l} Satz ${si + 1}" value="${st[k] === null || st[k] === undefined ? '' : esc(String(ex.type === 'assist' && k === 'w' ? Math.abs(st[k]) : st[k]).replace('.', ','))}" data-input="set" data-arg="${s.id}:${idx}:${si}:${k}">`).join('')}${timed ? swBtn(`${s.id}:${idx}:${si}:s`) : ''}<button class="x" data-act="delSet" data-arg="${s.id}:${idx}:${si}" aria-label="Satz löschen">×</button></div>`).join('') +
         `</div><button class="btn sm" data-act="addSet" data-arg="${s.id}:${idx}">+ Satz</button>`;
     }
     return `<div class="ex ${paused ? 'paused' : ''}"><div class="row between"><h3>${esc(ex.name)}${ex.uni ? ' <span class="faint small">pro Seite</span>' : ''}</h3>
@@ -409,6 +448,20 @@
       <p class="last">${lastTxt}</p>${body}
       <input type="text" style="margin-top:10px;min-height:40px;font-size:14px" placeholder="Notiz zur Übung" value="${esc(it.note || '')}" data-input="itemNote" data-arg="${s.id}:${idx}">
       <div class="row" style="justify-content:flex-end;margin-top:8px">${last ? `<button class="btn sm ghost" style="margin-right:auto" data-act="open" data-arg="exStats:${it.ex}">Verlauf</button>` : ''}<button class="btn sm ghost" data-act="moveItem" data-arg="${s.id}:${idx}:-1" aria-label="Nach oben">↑</button><button class="btn sm ghost" data-act="moveItem" data-arg="${s.id}:${idx}:1" aria-label="Nach unten">↓</button><button class="btn sm danger" data-act="delItem" data-arg="${s.id}:${idx}" aria-label="Übung entfernen">✕</button></div></div>`;
+  }
+  // Stoppuhr für Zeit-Sätze: läuft über Zeitstempel weiter, auch wenn der Bildschirm kurz ausgeht
+  const PLAY = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>';
+  const clock = sec => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  const swSec = () => ui.sw ? Math.floor((Date.now() - ui.sw.t0) / 1000) : 0;
+  const swBtn = key => { const run = ui.sw && ui.sw.key === key; return `<button class="swt ${run ? 'run' : ''}" data-act="stopwatch" data-arg="${key}" aria-label="${run ? 'Stoppuhr anhalten und eintragen' : 'Stoppuhr starten'}">${run ? `<span class="num swrun">${clock(swSec())}</span>` : PLAY}</button>`; };
+  function stopSw() {
+    clearInterval(ui.swTimer); ui.swTimer = null; ui.sw = null;
+    if (ui.wake) { ui.wake.release().catch(() => {}); ui.wake = null; }
+  }
+  function startSw(key) {
+    stopSw(); ui.sw = { key, t0: Date.now() };
+    ui.swTimer = setInterval(() => document.querySelectorAll('.swrun').forEach(el => { el.textContent = clock(swSec()); }), 250);
+    try { if (navigator.wakeLock) navigator.wakeLock.request('screen').then(l => { ui.wake = l; }).catch(() => {}); } catch (e) {}
   }
   function screenMove({ id }) {
     const m = S.sessions.find(x => x.id === id); if (!m) return header('Nicht gefunden');
@@ -532,7 +585,7 @@
   function viewGewicht() {
     const d = today(), ws = C.weightStatus(S.weights, d);
     const ms = [...S.measurements].sort((a, b) => a.t.localeCompare(b.t)), lastNavy = ms[ms.length - 1];
-    const tp = C.tempo(ws.daily, d), m = weightModel(ws, tp, d);
+    const tp = C.tempo(ws.daily, d), m = weightModel(ws, tp, d), bmiNow = bmi(ws.avg), st = weightStats(ws, rangeFor(ws), d);
     const fat = lastNavy && lastNavy.fat !== null && lastNavy.fat !== undefined ? `${C.fmt(lastNavy.fat)} %` : '–';
     const chips = [tp === null ? '' : `<span class="chip-b num">${tp > 0 ? '↑' : '↓'} ${C.fmt(Math.abs(tp), 2)} kg/Wo</span>`,
       m.phase === 1 ? `<span class="chip-b num">${m.left > 0 ? `noch ${C.fmt(m.left)} kg` : (m.rl ? `noch ${m.rl} Wiegetage` : 'Ziel erreicht')}${m.when ? ' · ' + m.when : ''}</span>` : `<span class="chip-b num">Puffer ${C.fmt(m.buffer)} kg</span>`].join('');
@@ -541,10 +594,11 @@
       <div class="ring-cap">${m.phase === 1 ? `Phase 2 (monatlich) ab ${C.fmt(C.T.p1to3)} kg` : `Grenze ${C.fmt(C.T.relapse)} kg`}</div><div class="chips-b">${chips}</div></div>
       <div class="entry-b"><input type="text" inputmode="decimal" placeholder="Gewicht, kg" id="wKg" aria-label="Gewicht in kg"><button class="iconbtn lg" data-act="toggleWhen" aria-label="Anderer Zeitpunkt">${CLOCK}</button><button class="fab" data-act="addWeight" aria-label="Gewicht speichern">${CHECK}</button></div>
       <input type="datetime-local" id="wWhen" hidden style="margin:-4px 0 12px" value="${C.nowLocal()}">
-      <div class="card"><div class="row between"><h2 style="margin:0">Verlauf</h2><div class="seg">${['1M', '3M', '6M', '1J'].map(r => `<button aria-pressed="${rangeFor(ws) === r}" data-act="range" data-arg="${r}">${r}</button>`).join('')}</div></div>
+      <div class="card"><h2 style="margin:0 0 10px">Verlauf</h2>${rangeSeg(rangeFor(ws), 'range')}
       ${chart(ws, d)}</div>
-      <div class="duo"><button class="card tilebtn" data-act="open" data-arg="measure"><span class="lbl">Körperfett</span><b class="num">${fat}</b><span class="faint small num">${lastNavy ? dShort(lastNavy.t) : 'messen'}</span></button>
-      <button class="card tilebtn" data-act="open" data-arg="weights"><span class="lbl">Einträge</span><b class="num">${S.weights.length}</b><span class="faint small num">zuletzt ${ws.lastDay ? dShort(ws.lastDay).slice(3) : '–'}</span></button></div>`;
+      <div class="trio"><button class="card tilebtn" data-act="open" data-arg="body"><span class="lbl">Körper</span><b class="num">${bmiNow === null ? '–' : C.fmt(bmiNow)}</b><span class="faint small num">${bmiNow === null ? 'Größe fehlt' : 'BMI'}${lastNavy ? ' · ' + fat : ''}</span></button>
+      <button class="card tilebtn" data-act="open" data-arg="wstats"><span class="lbl">Statistik</span><b class="num">${st.dAvg === null ? '–' : signed(st.dAvg)}</b><span class="faint small num">Ø · ${rangeFor(ws)}</span></button>
+      <button class="card tilebtn" data-act="open" data-arg="weights"><span class="lbl">Einträge</span><b class="num">${S.weights.length}</b><span class="faint small num">${ws.lastDay ? dShort(ws.lastDay).slice(3, 9) : '–'}</span></button></div>`;
   }
   function kfaChart(ms) {
     if (ms.length < 2) return '';
@@ -565,7 +619,7 @@
   }
   function chart(ws, d) {
     if (!ws.daily.length) return '<p class="muted">Noch keine Werte.</p>';
-    const from = C.addDays(d, -({ '1M': 30, '3M': 91, '6M': 182, '1J': 365 }[rangeFor(ws)] || 30));
+    const from = rangeFrom(rangeFor(ws), ws, d);
     const pts = ws.daily.filter(x => x.d >= from);
     const avg = [];
     const step = 1;
@@ -589,6 +643,96 @@
     const dots = pts.map(p => `<circle cx="${X(p.d).toFixed(1)}" cy="${Y(p.kg).toFixed(1)}" r="${pts.length > 150 ? 1.4 : 2.2}" style="fill:var(--sage)" fill-opacity=".45"/>`).join('');
     const line = avg.map((a, k) => `${k ? 'L' : 'M'}${X(a.d).toFixed(1)},${Y(a.kg).toFixed(1)}`).join('');
     return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Gewichtsverlauf">${g}${dots}<path d="${line}" fill="none" style="stroke:var(--sage)" stroke-width="2.5" stroke-linejoin="round"/></svg>`;
+  }
+  // ---------- Körperwerte und Statistik ----------
+  const rangeSeg = (cur, act) => `<div class="seg wide rng">${RANGES.map(r => `<button aria-pressed="${cur === r}" data-act="${act}" data-arg="${r}">${r}</button>`).join('')}</div>`;
+  const signed = (v, unit = ' kg') => `${v > 0.04 ? '+' : v < -0.04 ? '−' : '±'}${C.fmt(Math.abs(v), 1)}${unit}`;
+  const heightM = () => S.settings.heightCm ? S.settings.heightCm / 100 : null;
+  const bmi = kg => { const h = heightM(); return h && kg ? kg / (h * h) : null; };
+  // Gewicht an einem Tag: 30-Tage-Ø, sonst nächster Tageswert
+  function weightAt(ws, day) {
+    const a = C.avg30(ws.daily, day); if (a !== null) return a;
+    let best = null; for (const x of ws.daily) if (!best || Math.abs(C.diffDays(x.d, day)) < Math.abs(C.diffDays(best.d, day))) best = x;
+    return best ? best.kg : null;
+  }
+  const measures = () => [...S.measurements].filter(m => typeof m.fat === 'number').sort((a, b) => a.t.localeCompare(b.t));
+  // Fett- und Magermasse zum Messzeitpunkt
+  function bodyAt(ws, m) { const kg = weightAt(ws, m.t.slice(0, 10)); return kg === null ? null : { kg, fatKg: kg * m.fat / 100, leanKg: kg * (1 - m.fat / 100) }; }
+  function weightStats(ws, r, d) {
+    const from = rangeFrom(r, ws, d), pts = ws.daily.filter(x => x.d >= from && x.d <= d);
+    const a0 = C.avg30(ws.daily, from < (ws.daily[0] || {}).d ? ws.daily[0].d : from), a1 = C.avg30(ws.daily, d);
+    const out = { from, n: pts.length, dAvg: a0 !== null && a1 !== null && pts.length ? a1 - a0 : null, a0, a1 };
+    if (pts.length) {
+      out.min = pts.reduce((x, y) => y.kg < x.kg ? y : x); out.max = pts.reduce((x, y) => y.kg > x.kg ? y : x);
+      out.mean = pts.reduce((s, x) => s + x.kg, 0) / pts.length;
+    }
+    const ms = measures().filter(m => m.t.slice(0, 10) >= from && m.t.slice(0, 10) <= d);
+    if (ms.length >= 2) {
+      const f = ms[0], l = ms[ms.length - 1], bf = bodyAt(ws, f), bl = bodyAt(ws, l);
+      out.fat = { d: l.fat - f.fat, since: f.t.slice(0, 10) };
+      if (bf && bl) { out.fat.fatKg = bl.fatKg - bf.fatKg; out.fat.leanKg = bl.leanKg - bf.leanKg; }
+    }
+    return out;
+  }
+  // Farbige Skala mit Markierung; segs = [[bis, Farbe, Name], …], Grenzen darunter
+  function scale(v, lo, segs, dg = 1) {
+    const hi = segs[segs.length - 1][0], pos = x => Math.max(0, Math.min(100, (x - lo) / (hi - lo) * 100));
+    let prev = lo, bars = '', ticks = '';
+    segs.forEach(([to, col], i) => { bars += `<i style="left:${pos(prev)}%;width:${pos(to) - pos(prev)}%;background:${col}"></i>`; if (i < segs.length - 1) ticks += `<span style="left:${pos(to)}%">${C.fmtW(to)}</span>`; prev = to; });
+    return `<div class="scale"><div class="sbar">${bars}${v === null ? '' : `<b style="left:${pos(v)}%"></b>`}</div><div class="sticks num">${ticks}</div></div>`;
+  }
+  const segOf = (v, segs) => segs.find(s => v < s[0]) || segs[segs.length - 1];
+  const SC = { blue: '#7FA6D6', green: '#6FC2A0', yellow: '#E3C36F', orange: '#E8A06A', red: '#E5806F', deep: '#C9637A' };
+  // WHO-Einteilung für Erwachsene
+  const BMI_SEGS = [[18.5, SC.blue, 'Untergewicht'], [25, SC.green, 'Normalgewicht'], [30, SC.yellow, 'Präadipositas'], [35, SC.orange, 'Adipositas Grad I'], [40, SC.red, 'Adipositas Grad II'], [45, SC.deep, 'Adipositas Grad III']];
+  // NICE: unter 0,5 gesund, 0,5–0,59 erhöhtes, ab 0,6 weiter erhöhtes Risiko
+  const WHTR_SEGS = [[0.5, SC.green, 'gesund'], [0.6, SC.yellow, 'erhöhtes Risiko'], [0.8, SC.red, 'weiter erhöhtes Risiko']];
+  // Einteilung wie in Gewichtskontrolle (Männer)
+  const KFA_SEGS = [[8, SC.blue, 'niedrig'], [19, SC.green, 'normal'], [25, SC.yellow, 'hoch'], [45, SC.red, 'sehr hoch']];
+  const chip = (seg) => `<span class="pill" style="background:color-mix(in srgb,${seg[1]} 26%,var(--s2))"><i class="cdot" style="--c:${seg[1]}"></i>${seg[2]}</span>`;
+  function screenBody() {
+    const d = today(), ws = C.weightStatus(S.weights, d), h = heightM();
+    let out = header('Körper', infoBtn('body'));
+    if (!h) return out + `<div class="card"><p class="muted">Trag unter „Mehr“ › „Gewicht“ deine Körpergröße ein.</p></div>`;
+    const b = bmi(ws.avg), lo = 18.5 * h * h, hi = 25 * h * h;
+    out += `<div class="card"><div class="row between"><span class="lbl">BMI</span>${b === null ? '' : chip(segOf(b, BMI_SEGS))}</div>
+      <div class="hero-num num">${b === null ? '–' : C.fmt(b)}</div>${scale(b, 15, BMI_SEGS)}
+      <div class="kv num"><span>Normalbereich</span><b>${C.fmt(lo)}–${C.fmt(hi)} kg</b></div>
+      ${ws.avg !== null && ws.avg > hi ? `<div class="kv num"><span>darüber</span><b>${C.fmt(ws.avg - hi)} kg</b></div>` : ''}</div>`;
+    const ms = measures(), last = ms[ms.length - 1], lw = [...ms].reverse().find(m => typeof m.waist === 'number');
+    if (lw) {
+      const r = lw.waist / S.settings.heightCm;
+      out += `<div class="card"><div class="row between"><span class="lbl">Bauch zu Größe</span>${chip(segOf(r, WHTR_SEGS))}</div>
+        <div class="hero-num num">${C.fmt(r, 2)}</div>${scale(r, 0.3, WHTR_SEGS)}
+        <div class="kv num"><span>Bauch</span><b>${C.fmtW(lw.waist)} cm</b></div>
+        <div class="kv num"><span>Ziel unter</span><b>${C.fmtW(S.settings.heightCm / 2)} cm</b></div></div>`;
+    }
+    if (last) {
+      const bd = bodyAt(ws, last);
+      out += `<div class="card"><div class="row between"><span class="lbl">Körperfett · ${dNum(last.t)}</span>${chip(segOf(last.fat, KFA_SEGS))}</div>
+        <div class="hero-num num">${C.fmt(last.fat)} %</div>${scale(last.fat, 0, KFA_SEGS, 0)}
+        ${bd ? `<div class="stats" style="margin-top:12px"><div class="stat"><b class="num">${C.fmt(bd.fatKg)}</b><span>Fett kg</span></div><div class="stat"><b class="num">${C.fmt(bd.leanKg)}</b><span>Mager kg</span></div></div>` : ''}
+        ${ms.length >= 2 ? `<div style="margin-top:12px">${kfaChart(ms)}</div>` : ''}</div>`;
+    }
+    return out + `<button class="btn primary block" data-act="open" data-arg="measure">Umfänge messen</button>`;
+  }
+  function screenWStats() {
+    const d = today(), ws = C.weightStatus(S.weights, d), r = ui.range || rangeFor(ws), st = weightStats(ws, r, d), h = heightM();
+    const tone = (v, goodDown = true) => v === null || v === undefined || Math.abs(v) < 0.05 ? '' : ((v < 0) === goodDown ? 'good' : 'bad');
+    const row = (l, v, cls = '', sub = '') => `<div class="kv num"><span>${l}${sub ? ` <span class="faint small">${sub}</span>` : ''}</span><b class="${cls}">${v}</b></div>`;
+    let out = header('Statistik', infoBtn('wstats')) + rangeSeg(r, 'range');
+    if (!st.n) return out + `<div class="card"><p class="muted">Keine Werte in diesem Zeitraum.</p></div>`;
+    out += `<div class="card"><div class="lbl" style="margin:0 0 6px">Veränderung</div>
+      ${row('Ø 30 Tage', st.dAvg === null ? '–' : signed(st.dAvg), tone(st.dAvg))}
+      ${h && st.dAvg !== null ? row('BMI', signed(st.dAvg / (h * h), ''), tone(st.dAvg)) : ''}
+      ${st.fat ? row('Körperfett', signed(st.fat.d, ' %'), tone(st.fat.d), `seit ${dNum(st.fat.since).slice(0, 6)}`) : row('Körperfett', '–', '', 'ab 2 Messungen')}
+      ${st.fat && st.fat.fatKg !== undefined ? row('Fettmasse', signed(st.fat.fatKg), tone(st.fat.fatKg)) + row('Magermasse', signed(st.fat.leanKg), tone(st.fat.leanKg, false)) : ''}</div>
+      <div class="card"><div class="lbl" style="margin:0 0 6px">Wiegungen</div>
+      ${row('Tiefster Wert', `${C.fmt(st.min.kg)} kg`, '', dNum(st.min.d).slice(0, 6))}
+      ${row('Höchster Wert', `${C.fmt(st.max.kg)} kg`, '', dNum(st.max.d).slice(0, 6))}
+      ${row('Durchschnitt', `${C.fmt(st.mean)} kg`)}
+      ${row('Wiegetage', st.n)}</div>`;
+    return out;
   }
   function screenWeights() { return header('Alle Einträge') + weightTable(99999); }
   function screenMeasure() {
@@ -624,21 +768,40 @@
       <div class="seg wide">${THEMES.map(([k, l]) => `<button aria-pressed="${(S.settings.theme || 'dark') === k}" data-act="theme" data-arg="${k}">${l}</button>`).join('')}</div>
       <div class="card accents"><div class="row between"><span class="lbl">Akzentfarbe</span><span class="muted small">${ACCENTS[acc][0]}</span></div>
       <div class="swatches">${Object.entries(ACCENTS).map(([k, v]) => `<button class="swatch" style="background:${v[1]}" aria-pressed="${k === acc}" data-act="accent" data-arg="${k}" aria-label="Akzentfarbe ${v[0]}">${k === acc ? CHECK : ''}</button>`).join('')}</div></div>
-      <div class="card">${set('Schrift', seg('fontScale', [['normal', 'Normal'], ['large', 'Groß']]))}${set('Gewohnheiten auf „Heute“', seg('heuteView', [['tiles', 'Kacheln'], ['list', 'Liste']]))}</div>
-      <div class="wlist">${row('tabOrder', 'Seiten', `Start: ${TAB_LABELS[tabOrder()[0]]}${hidN ? ` · ${hidN} aus` : ''}`)}${row('ring', 'Wochenring', `${nIn} von ${act.length}`)}</div>
+      <div class="wlist">${row('heuteLook', '„Heute“ gestalten', VIEW_LABELS[setting('heuteView', 'tiles')] || 'Kacheln')}${row('tabOrder', 'Seiten', `Start: ${TAB_LABELS[tabOrder()[0]]}${hidN ? ` · ${hidN} aus` : ''}`)}${row('ring', 'Wochenring', `${nIn} von ${act.length}`)}</div>
       <div class="lbl mon">Training</div>
       <div class="card">${set('„Einheit starten“', seg('trainStart', [['ask', 'Fragen'], ['repeat', 'Wie zuletzt'], ['empty', 'Leer']]))}</div>
       <div class="lbl mon">Gewicht</div>
-      <div class="card">${set('Diagramm zeigt zuerst', seg('weightRange', [['auto', 'Auto'], ['1M', '1M'], ['3M', '3M'], ['6M', '6M'], ['1J', '1J']]))}
+      <div class="card">${set('Diagramm zeigt zuerst', seg('weightRange', [['auto', 'Auto'], ...RANGES.map(r => [r, r])]))}
       <div class="opt"><label class="lbl" for="wLines">Markierungen in kg</label><input type="text" id="wLines" inputmode="decimal" value="${weightLines().map(C.fmtW).join(' ')}" data-change="weightLines" placeholder="z. B. 99 92 88"></div>
       <div class="opt"><label class="lbl" for="hCm">Körpergröße in cm</label><input type="text" id="hCm" inputmode="decimal" value="${S.settings.heightCm || ''}" data-change="height" placeholder="cm"></div></div>
       <p class="faint small" id="persist" style="margin:18px 0 4px">…</p>
-      <p class="faint small" style="margin:0">Dein Leben 2.4.1</p>`;
+      <p class="faint small" style="margin:0">Dein Leben 2.5.0</p>`;
   }
-  const DEFAULTS = { fontScale: 'normal', heuteView: 'tiles', trainStart: 'ask', weightRange: 'auto', backupDays: 7 };
+  const DEFAULTS = { dotShape: 'bar', dotLabel: 'none', heuteView: 'tiles', trainStart: 'ask', weightRange: 'auto', backupDays: 7 };
   const iconOf = k => `<span class="sn"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg></span>`;
   const emoOf = h => `<span class="sn" style="background:color-mix(in srgb,${h.color} 28%,var(--s2));font-size:20px">${esc(h.emoji)}</span>`;
   const upDown = (act, i, last, name) => `<button class="iconbtn sm" data-act="${act}" data-arg="${i}:-1" aria-label="${name} nach oben" ${i === 0 ? 'disabled' : ''}>↑</button><button class="iconbtn sm" data-act="${act}" data-arg="${i}:1" aria-label="${name} nach unten" ${i === last ? 'disabled' : ''}>↓</button>`;
+  const VIEW_LABELS = { tiles: 'Kacheln', list: 'Liste', year: 'Jahr' };
+  const LOOK_KEYS = ['heuteView', 'dotShape', 'dotLabel', ...Object.keys(FLAGS)];
+  function screenHeuteLook() {
+    const seg = (key, opts, dis) => `<div class="seg wide">${opts.map(([k, l]) => `<button aria-pressed="${String(setting(key, DEFAULTS[key])) === String(k)}" data-act="setting" data-arg="${key}:${k}" ${dis ? 'disabled' : ''}>${l}</button>`).join('')}</div>`;
+    const sw = (k, l, dis) => `<label class="srow" style="cursor:pointer"><b class="grow">${l}</b><input type="checkbox" class="sw" ${flag(k) ? 'checked' : ''} ${dis ? 'disabled' : ''} data-change="flag" data-arg="${k}" aria-label="${l}"></label>`;
+    const d = today(), h = activeHabits()[0], bar = setting('dotShape', 'bar') === 'bar';
+    let prev = '';
+    if (h) {
+      const st = C.habitStats(S, h, d), v = setting('heuteView', 'tiles'), tint = flag('tintDone') ? 'tint' : '';
+      prev = v === 'list' ? `<div class="card"><div class="hlist2 ${tint}">${habitRow(h, st, d)}</div></div>` : v === 'year' ? `<div class="years ${tint}">${habitYear(h, st, d)}</div>` : `<div class="tiles ${tint}" style="grid-template-columns:1fr">${habitTile(h, st, d)}</div>`;
+    }
+    const changed = LOOK_KEYS.some(k => S.settings[k] !== undefined);
+    return `${header('„Heute“ gestalten')}<div class="preview">${prev}</div>
+      <div class="lbl mon">Ansicht</div>${seg('heuteView', Object.entries(VIEW_LABELS))}
+      <div class="lbl mon">Tagespunkte</div>${seg('dotShape', [['bar', 'Balken'], ['square', 'Quadrat'], ['circle', 'Kreis']])}
+      <div style="height:8px"></div>${seg('dotLabel', [['none', 'Ohne'], ['wd', 'Wochentag'], ['date', 'Datum']])}
+      <div class="wlist" style="margin-top:8px">${sw('dotCheck', 'Häkchen in erledigten Punkten', bar)}${sw('tintDone', 'Erledigte farbig hinterlegen')}${sw('anim', 'Animation beim Abhaken')}${sw('confirmBackfill', 'Nachfrage beim Nachtragen')}</div>
+      ${bar ? '<p class="faint small" style="margin:8px 4px 0">Häkchen gibt es bei Quadrat und Kreis.</p>' : ''}
+      <div style="height:14px"></div><button class="btn ghost block" data-act="resetLook" ${changed ? '' : 'disabled'}>Zurücksetzen</button>`;
+  }
   function screenTabOrder() {
     const o = tabOrderAll(), last = o.length - 1, hid = tabHidden(), first = tabOrder()[0];
     return `${header('Seiten')}
@@ -752,7 +915,7 @@
   function logGoal(year, action, title, reason) { S.goalLog.push({ t: C.nowLocal(), year: String(year), action, title, reason: reason || '' }); }
 
   const TABS = { heute: viewHeute, ziele: viewZiele, training: viewTraining, gewicht: viewGewicht, mehr: viewMehr };
-  const SCREENS = { tabOrder: screenTabOrder, ring: screenRing, cats: screenCats, catEdit: screenCatEdit, habit: screenHabit, habitEdit: screenHabitEdit, session: screenSession, move: screenMove, exercises: screenExercises, exEdit: screenExEdit, pauses: screenPauses, weights: screenWeights, measure: screenMeasure, habits: screenHabits, goalEdit: screenGoalEdit, progress: screenProgress, exStats: screenExStats };
+  const SCREENS = { tabOrder: screenTabOrder, ring: screenRing, cats: screenCats, catEdit: screenCatEdit, habit: screenHabit, habitEdit: screenHabitEdit, session: screenSession, move: screenMove, exercises: screenExercises, exEdit: screenExEdit, pauses: screenPauses, weights: screenWeights, measure: screenMeasure, heuteLook: screenHeuteLook, body: screenBody, wstats: screenWStats, habits: screenHabits, goalEdit: screenGoalEdit, progress: screenProgress, exStats: screenExStats };
 
   // ---------- Sheets ----------
   const INFOS = {
@@ -764,6 +927,12 @@
       <p><b>Wiederherstellen</b> ersetzt alle Daten in der App durch die gewählte Datei.</p>`],
     habit: ['Gewohnheit', () => `<p><b>Kalender:</b> Tippe auf einen Tag, um ihn nachzutragen oder zu entfernen. Sport ergibt sich automatisch aus Trainings und Bewegung ab 60 Minuten.</p>
       <p><b>Quote:</b> Bei „X-mal pro Woche“ zählen Monat und Jahr den Anteil der Wochen mit erreichtem Ziel.</p>`],
+    body: ['Körperwerte', () => `<p><b>BMI:</b> aus deinem 30-Tage-Ø und der Körpergröße. Einteilung nach WHO: unter 18,5 Untergewicht, bis 24,9 Normalgewicht, bis 29,9 Präadipositas, dann Adipositas Grad I (bis 34,9), II (bis 39,9) und III. Der BMI unterscheidet nicht zwischen Fett und Muskeln.</p>
+      <p><b>Bauch zu Größe:</b> Bauchumfang aus deiner letzten Messung geteilt durch die Größe. Nach NICE: unter 0,5 gesund, 0,5 bis 0,59 erhöhtes, ab 0,6 weiter erhöhtes Gesundheitsrisiko.</p>
+      <p><b>Körperfett:</b> Navy-Methode, eine Schätzung mit einigen Prozentpunkten Unsicherheit. Fett- und Magermasse rechnen mit dem 30-Tage-Ø am Messtag. Die Einteilung (unter 8 %, bis 19 %, bis 25 %, darüber) stammt aus Gewichtskontrolle; eine Primärquelle dafür ist nicht geprüft.</p>`],
+    wstats: ['Statistik', () => `<p><b>Veränderung:</b> 30-Tage-Ø heute gegen den 30-Tage-Ø am Beginn des Zeitraums. Einzelwerte schwanken von Tag zu Tag zu stark für einen fairen Vergleich.</p>
+      <p><b>Körperfett:</b> erste gegen letzte Messung im Zeitraum, deshalb erst ab zwei Messungen.</p>
+      <p><b>Wiegungen:</b> pro Tag zählt die erste Messung.</p>`],
     measure: ['Navy-Methode', () => `<p>Hals knapp unter dem Kehlkopf, Bauch auf Nabelhöhe messen. Immer gleich messen, dann ist der Verlauf aussagekräftig.</p><p>Der Wert ist eine Schätzung mit einigen Prozentpunkten Unsicherheit.</p>`],
     pauses: ['Pausen', () => `<p>Pausierte Kategorien erscheinen in Einheiten markiert. Du beendest eine Pause selbst.</p>`],
     ex: ['Kennzahlen', () => `<p><b>Geschätztes 1RM:</b> Epley-Formel aus dem besten Satz, ab etwa 12 Wiederholungen ungenauer.</p><p><b>Volumen:</b> Gewicht × Wiederholungen über alle Sätze.</p><p><b>Gegengewicht:</b> Achse umgekehrt, weniger Hilfe liegt oben, weil es der Fortschritt ist.</p><p><b>Gelber Punkt:</b> Bestwert.</p>`]
@@ -807,7 +976,10 @@
   function toggleCheck(hid, day) {
     const h = S.habits.find(x => x.id === hid); if (!h || h.link === 'sport' || day > today() || day < h.start) return;
     S.checks[hid] = S.checks[hid] || {};
-    if (S.checks[hid][day]) delete S.checks[hid][day]; else S.checks[hid][day] = 1;
+    const was = !!S.checks[hid][day];
+    if (day !== today() && flag('confirmBackfill') && !confirm(`${dLong(day)}: ${was ? 'Haken entfernen' : 'als erledigt nachtragen'}?`)) return;
+    if (was) delete S.checks[hid][day]; else S.checks[hid][day] = 1;
+    if (!was && flag('anim')) ui.pop = `${hid}:${day}`;
     save(); render();
   }
   function cloneSets(sets) { return sets.map(x => ({ ...x })); }
@@ -921,9 +1093,17 @@
       save(); closeSheet(); setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 150);
     },
     addSet: a => { const [sid, idx] = a.split(':'); const it = S.sessions.find(x => x.id === sid).items[Number(idx)]; it.sets.push(it.sets.length ? { ...it.sets[it.sets.length - 1] } : {}); save(); render(); },
-    delSet: a => { const { it, si } = findSet(a + ':x'); it.sets.splice(si, 1); save(); render(); },
-    delItem: a => { const [sid, idx] = a.split(':'); if (!confirm('Übung aus dieser Einheit entfernen?')) return; S.sessions.find(x => x.id === sid).items.splice(Number(idx), 1); save(); render(); },
-    moveItem: a => { const [sid, idx, dir] = a.split(':'); const it = S.sessions.find(x => x.id === sid).items; const i = Number(idx), j = i + Number(dir); if (j < 0 || j >= it.length) return; [it[i], it[j]] = [it[j], it[i]]; save(); render(); },
+    stopwatch: a => {
+      if (ui.sw && ui.sw.key === a) {
+        const sec = swSec(), { it, si } = findSet(a); stopSw();
+        if (it && it.sets[si] && sec > 0) { it.sets[si].s = sec; save(); toast(`${clock(sec)} eingetragen`); }
+        render(); return;
+      }
+      startSw(a); render();
+    },
+    delSet: a => { if (ui.sw && ui.sw.key.startsWith(a + ':')) stopSw(); const { it, si } = findSet(a + ':x'); it.sets.splice(si, 1); save(); render(); },
+    delItem: a => { const [sid, idx] = a.split(':'); if (!confirm('Übung aus dieser Einheit entfernen?')) return; if (ui.sw) stopSw(); S.sessions.find(x => x.id === sid).items.splice(Number(idx), 1); save(); render(); },
+    moveItem: a => { if (ui.sw) stopSw(); const [sid, idx, dir] = a.split(':'); const it = S.sessions.find(x => x.id === sid).items; const i = Number(idx), j = i + Number(dir); if (j < 0 || j >= it.length) return; [it[i], it[j]] = [it[j], it[i]]; save(); render(); },
     saveEx: a => {
       const [id, sid] = a.split(':'); const name = document.getElementById('eName').value.trim(); if (!name) return toast('Gib der Übung einen Namen.');
       const e = id ? C.exById(S, id) : { id: uid('e') };
@@ -945,6 +1125,7 @@
       if (j < 0 || j >= o.length) return;
       [o[i], o[j]] = [o[j], o[i]]; S.settings.tabOrder = o; save(); render();
     },
+    resetLook: () => { LOOK_KEYS.forEach(k => delete S.settings[k]); save(); render(); },
     resetTabs: () => { delete S.settings.tabOrder; delete S.settings.tabHidden; save(); render(); },
     setting: a => {
       const i = a.indexOf(':'), k = a.slice(0, i); let v = a.slice(i + 1);
@@ -1045,6 +1226,7 @@
     moveField: (el, a) => INPUTS.moveField(el, a),
     itemDone: (el, a) => { const [sid, idx] = a.split(':'); S.sessions.find(x => x.id === sid).items[Number(idx)].done = el.checked; save(); },
     goalType: el => { document.querySelectorAll('[data-gtype]').forEach(x => { x.hidden = x.dataset.gtype !== el.value; }); },
+    flag: (el, a) => { if (!(a in FLAGS)) return; S.settings[a] = el.checked; save(); render(); },
     ringToggle: (el, a) => { const ex = setting('ringExclude', []).filter(x => x !== a); if (!el.checked) ex.push(a); S.settings.ringExclude = ex; save(); },
     tabShow: (el, a) => {
       const h = tabHidden().filter(x => x !== a); if (!el.checked) h.push(a);

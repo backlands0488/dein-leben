@@ -290,7 +290,7 @@
   // ---------- Training ----------
   const TYPES = {
     weight: 'Gewicht × Wdh.', assist: 'Gegengewicht × Wdh.', reps: 'Nur Wiederholungen',
-    time: 'Sätze × Zeit', cardio: 'Dauer, Tempo, Steigung', sled: 'Gewicht × Strecke', done: 'Nur erledigt'
+    time: 'Sätze × Zeit', wtime: 'Gewicht × Zeit', cardio: 'Dauer, Tempo, Steigung', sled: 'Gewicht × Strecke', done: 'Nur erledigt'
   };
   const CATS = ['Druck', 'Zug', 'Beine', 'Rumpf', 'Ausdauer', 'Reha'];
   const exById = (state, id) => state.exercises.find(e => e.id === id);
@@ -315,8 +315,9 @@
     if (ex.type === 'done') return 'erledigt';
     if (!sets.length) return '';
     if (ex.type === 'cardio') return sets.map(s => [s.min ? `${fmtW(s.min)} Min.` : '', s.kmh ? `${fmtW(s.kmh)} km/h` : '', s.incl ? `Steigung ${s.incl}` : '', s.km ? `${fmtW(s.km)} km` : ''].filter(Boolean).join(', ')).join(' + ');
-    if (ex.type === 'time') return groupRuns(sets.map(s => s.s)).map(([v, n]) => `${n}× ${v >= 60 && v % 60 === 0 ? v / 60 + ' Min.' : v + ' Sek.'}`).join(', ');
+    if (ex.type === 'time') return groupRuns(sets.map(s => s.s)).map(([v, n]) => `${n}× ${secTxt(v)}`).join(', ');
     if (ex.type === 'sled') return sets.map(s => `${fmtW(s.w)} kg × ${fmtW(s.m)} m`).join(', ');
+    if (ex.type === 'wtime') return sets.map(s => `${isNum(s.w) ? fmtW(s.w) + ' kg' : '? kg'} × ${isNum(s.s) ? secTxt(s.s) : '?'}`).join(', ');
     if (ex.type === 'reps') return repsText(sets.map(s => s.r));
     // weight/assist: nach Gewicht gruppieren
     const groups = [];
@@ -332,6 +333,7 @@
     time: [['maxs', 'Längster Satz', 'Sek.'], ['tots', 'Gesamtzeit', 'Sek.']],
     cardio: [['min', 'Dauer', 'Min.'], ['kmh', 'Tempo', 'km/h']],
     sled: [['max', 'Höchstes Gewicht', 'kg'], ['m', 'Strecke gesamt', 'm']],
+    wtime: [['max', 'Höchstes Gewicht', 'kg'], ['maxs', 'Längster Satz', 'Sek.'], ['tots', 'Gesamtzeit', 'Sek.']],
     done: []
   };
   const isNum = x => typeof x === 'number' && !Number.isNaN(x);
@@ -346,6 +348,7 @@
     else if (ex.type === 'reps') { v.maxr = mx(rs); v.reps = sum(rs); }
     else if (ex.type === 'time') { const t = sets.map(x => x.s).filter(isNum); v.maxs = mx(t); v.tots = sum(t); }
     else if (ex.type === 'cardio') { v.min = sum(sets.map(x => x.min).filter(isNum)); v.kmh = mx(sets.map(x => x.kmh).filter(isNum)); }
+    else if (ex.type === 'wtime') { v.max = mx(sets.map(x => x.w).filter(isNum)); const t = sets.map(x => x.s).filter(isNum); v.maxs = mx(t); v.tots = sum(t); }
     else if (ex.type === 'sled') { v.max = mx(sets.map(x => x.w).filter(isNum)); v.m = sum(sets.map(x => x.m).filter(isNum)); }
     for (const k of Object.keys(v)) if (!isNum(v[k])) delete v[k];
     return v;
@@ -369,6 +372,7 @@
     return [...best.values()].sort((a, b) => a.r - b.r);
   }
 
+  const secTxt = v => v >= 60 && v % 60 === 0 ? v / 60 + ' Min.' : v + ' Sek.';
   function groupRuns(arr) { const out = []; for (const v of arr) { const g = out[out.length - 1]; if (g && g[0] === v) g[1]++; else out.push([v, 1]); } return out; }
   function repsText(r) { r = r.filter(x => x !== null && x !== undefined); if (!r.length) return ''; return r.every(x => x === r[0]) ? `${r.length}×${r[0]}` : r.join('/'); }
 
