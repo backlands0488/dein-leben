@@ -50,6 +50,7 @@
     s.settings = s.settings || {}; s.notices = s.notices || [];
     s.goals = s.goals || []; s.goalLog = s.goalLog || [];
     migrateKfa(s);
+    migrateCatalog(s);
     return s;
   }
   // Alte KFA-Werte (selbst nach Navy gemessen) ab 06.05.2026 als Messungen übernehmen, nur echte Änderungen
@@ -287,6 +288,250 @@
     return { started };
   }
 
+
+  // ---------- Übungskatalog ----------
+  // Schema: Bewegung [Variante] (Gerät). Felder: Schlüssel | Name | Hauptmuskel | Nebenmuskeln | Gerät | Messart | Kategorie | Suchbegriffe | einseitig
+  const MUSCLES = {
+    brust: 'Brust', ruecken: 'Rücken', trapez: 'Trapez', schultern: 'Schultern', bizeps: 'Bizeps', trizeps: 'Trizeps', unterarme: 'Unterarme',
+    bauch: 'Bauch', ur: 'Unterer Rücken', gesaess: 'Gesäß', quad: 'Quadrizeps', beinbeuger: 'Beinbeuger', waden: 'Waden',
+    ganz: 'Ganzkörper', ausdauer: 'Ausdauer', mobil: 'Mobilität'
+  };
+  // Netzdiagramm: sechs Achsen wie in der Vorlage
+  const RADAR = [['Brust', ['brust']], ['Rumpf', ['bauch']], ['Schultern', ['schultern']], ['Arme', ['bizeps', 'trizeps', 'unterarme']], ['Beine', ['quad', 'beinbeuger', 'gesaess', 'waden']], ['Rücken', ['ruecken', 'trapez', 'ur']]];
+  const EQUIP = { lh: 'Langhantel', kh: 'Kurzhantel', sz: 'SZ-Stange', kg: 'Körpergewicht', kabel: 'Kabel', ma: 'Maschine', sonst: 'Sonstiges' };
+  const EQUIP_OFF = ['kabel', 'ma'];
+  const CAT_SRC = `
+bank-lh|Bankdrücken (Langhantel)|brust|trizeps,schultern|lh|weight|Druck|BP,Bench Press
+bank-kh|Bankdrücken (Kurzhantel)|brust|trizeps,schultern|kh|weight|Druck|Flachbankdrücken,Dumbbell Press
+schraeg-lh|Schrägbankdrücken (Langhantel)|brust|schultern,trizeps|lh|weight|Druck|Incline Bench,Schrägbank
+schraeg-kh|Schrägbankdrücken (Kurzhantel)|brust|schultern,trizeps|kh|weight|Druck|Incline,Schrägbank
+floor-lh|Floor Press (Langhantel)|brust|trizeps|lh|weight|Druck|Bodendrücken
+floor-kh|Floor Press (Kurzhantel)|brust|trizeps|kh|weight|Druck|Bodendrücken
+fly-kh|Fliegende (Kurzhantel)|brust|schultern|kh|weight|Druck|Flys,Butterfly
+flyschraeg-kh|Fliegende schräg (Kurzhantel)|brust|schultern|kh|weight|Druck|Incline Flys
+pullover-kh|Überzüge (Kurzhantel)|brust|ruecken,trizeps|kh|weight|Druck|Pullover
+lst|Liegestütze (Körpergewicht)|brust|trizeps,schultern,bauch|kg|reps|Druck|Push-up,Liegestütz
+lst-erh|Liegestütze erhöht (Körpergewicht)|brust|trizeps,schultern|kg|reps|Druck|Incline Push-up
+lst-fe|Liegestütze Füße erhöht (Körpergewicht)|brust|schultern,trizeps|kg|reps|Druck|Decline Push-up
+dips-kg|Dips (Körpergewicht)|brust|trizeps,schultern|kg|reps|Druck|Barrenstütz
+dips-ass|Dips (unterstützt)|brust|trizeps,schultern|ma|assist|Druck|Dips,Barrenstütz
+klimm|Klimmzug (Körpergewicht)|ruecken|bizeps,unterarme|kg|reps|Zug|Pull-up,Klimmzüge
+klimm-ass|Klimmzug (unterstützt)|ruecken|bizeps|ma|assist|Zug|Pull-up,Klimmzüge
+chin|Klimmzug Untergriff (Körpergewicht)|ruecken|bizeps|kg|reps|Zug|Chin Up,Chin Ups
+chin-ass|Klimmzug Untergriff (unterstützt)|ruecken|bizeps|ma|assist|Zug|Chin Up,Chin Ups
+klimm-neg|Klimmzug negativ (Körpergewicht)|ruecken|bizeps|kg|reps|Zug|Negatives
+rud-lh|Rudern vorgebeugt (Langhantel)|ruecken|bizeps,ur,trapez|lh|weight|Zug|Rudern,Barbell Row,Langhantelrudern
+pendlay|Pendlay-Rudern (Langhantel)|ruecken|bizeps,ur,trapez|lh|weight|Zug|Rudern
+rud-kh|Rudern vorgebeugt (Kurzhantel)|ruecken|bizeps,trapez|kh|weight|Zug|Rudern
+rud-1|Rudern einarmig (Kurzhantel)|ruecken|bizeps|kh|weight|Zug|Einarmrudern,Ein-Arm-Rudern|1
+rud-brust|Rudern brustgestützt (Kurzhantel)|ruecken|trapez,bizeps|kh|weight|Zug|Rudern,Chest Supported Row
+rud-inv|Rudern invertiert (Körpergewicht)|ruecken|bizeps|kg|reps|Zug|Australian Pull-up,Inverted Row
+shrug-lh|Schulterheben (Langhantel)|trapez|unterarme|lh|weight|Zug|Shrugs
+shrug-kh|Schulterheben (Kurzhantel)|trapez|unterarme|kh|weight|Zug|Shrugs
+latzug|Latzug (Maschine)|ruecken|bizeps|ma|weight|Zug|Freie Latzugmaschine,Lat Pulldown
+rud-kabel|Rudern sitzend (Kabel)|ruecken|bizeps|kabel|weight|Zug|Rudern,Seated Row
+facepull|Face Pull (Kabel)|schultern|trapez,ruecken|kabel|weight|Zug|Facepulls
+ohp-lh|Schulterdrücken stehend (Langhantel)|schultern|trizeps|lh|weight|Druck|MP,Military Press,Overhead Press,OHP
+ohp-kh-sitz|Schulterdrücken sitzend (Kurzhantel)|schultern|trizeps|kh|weight|Druck|Shoulder Press
+ohp-kh|Schulterdrücken stehend (Kurzhantel)|schultern|trizeps|kh|weight|Druck|Shoulder Press
+arnold|Arnold Press (Kurzhantel)|schultern|trizeps|kh|weight|Druck|Schulterdrücken
+landmine|Landmine Press (Langhantel)|schultern|brust,trizeps|lh|weight|Druck|Schulterdrücken
+seit|Seitheben (Kurzhantel)|schultern||kh|weight|Druck|Lateral Raise
+front|Frontheben (Kurzhantel)|schultern||kh|weight|Druck|Front Raise
+revfly|Reverse Flys (Kurzhantel)|schultern|trapez,ruecken|kh|weight|Zug|Vorgebeugtes Seitheben,Rear Delt
+pike|Pike-Liegestütze (Körpergewicht)|schultern|trizeps|kg|reps|Druck|Pike Push-up
+aussenrot|Außenrotation (Kurzhantel)|schultern||kh|weight|Reha|External Rotation,Rotatoren|1
+yheben|Y-Heben (Kurzhantel)|schultern|trapez|kh|weight|Reha|Y-Raise
+curl-lh|Bizepscurls (Langhantel)|bizeps|unterarme|lh|weight|Zug|Curls
+curl-sz|Bizepscurls (SZ-Stange)|bizeps|unterarme|sz|weight|Zug|Curls,EZ
+curl-kh|Bizepscurls (Kurzhantel)|bizeps|unterarme|kh|weight|Zug|Curls
+hammer|Hammercurls (Kurzhantel)|bizeps|unterarme|kh|weight|Zug|Curls
+curl-schraeg|Schrägbankcurls (Kurzhantel)|bizeps||kh|weight|Zug|Curls,Incline Curl
+curl-konz|Konzentrationscurls (Kurzhantel)|bizeps||kh|weight|Zug|Curls|1
+curl-rev|Reverse Curls (SZ-Stange)|unterarme|bizeps|sz|weight|Zug|Curls,EZ
+stirn|Stirndrücken (SZ-Stange)|trizeps||sz|weight|Druck|French Press,Skullcrusher,EZ
+tri-kopf|Trizepsdrücken über Kopf (Kurzhantel)|trizeps||kh|weight|Druck|Overhead Extension
+kickback|Kickbacks (Kurzhantel)|trizeps||kh|weight|Druck|Trizeps|1
+bank-eng|Bankdrücken eng (Langhantel)|trizeps|brust,schultern|lh|weight|Druck|Close Grip,BP eng
+bankdips|Bankdips (Körpergewicht)|trizeps|schultern|kg|reps|Druck|Bench Dips
+diamond|Diamond-Liegestütze (Körpergewicht)|trizeps|brust|kg|reps|Druck|Push-up eng
+handgelenk|Handgelenkcurls (Kurzhantel)|unterarme||kh|weight|Zug|Wrist Curls
+squat-lh|Kniebeuge (Langhantel)|quad|gesaess,ur|lh|weight|Beine|Squat,Back Squat
+front-squat|Frontkniebeuge (Langhantel)|quad|gesaess,bauch|lh|weight|Beine|Front Squat
+goblet|Goblet Squat (Kurzhantel)|quad|gesaess|kh|weight|Beine|Kniebeuge
+squat-kg|Kniebeuge (Körpergewicht)|quad|gesaess|kg|reps|Beine|Air Squat
+bss-kh|Bulgarian Split Squat (Kurzhantel)|quad|gesaess|kh|weight|Beine|Bulgarische Kniebeuge,BSS|1
+bss-kg|Bulgarian Split Squat (Körpergewicht)|quad|gesaess|kg|reps|Beine|Bulgarische Kniebeuge,BSS|1
+ausf-kh|Ausfallschritte (Kurzhantel)|quad|gesaess|kh|weight|Beine|Lunges|1
+ausf-kg|Ausfallschritte (Körpergewicht)|quad|gesaess|kg|reps|Beine|Lunges|1
+ausf-rueck|Ausfallschritte rückwärts (Kurzhantel)|quad|gesaess|kh|weight|Beine|Reverse Lunges|1
+stepup-kh|Step-up (Kurzhantel)|quad|gesaess|kh|weight|Beine|Step Up,Step Up einbeinig|1
+stepup-kg|Step-up (Körpergewicht)|quad|gesaess|kg|reps|Beine|Step Up,Step Up einbeinig|1
+dl|Kreuzheben (Langhantel)|gesaess|beinbeuger,ur,trapez,unterarme|lh|weight|Beine|DL,Deadlift
+sumo|Sumo-Kreuzheben (Langhantel)|gesaess|quad,beinbeuger,ur|lh|weight|Beine|Sumo Deadlift,DL
+rdl-lh|Rumänisches Kreuzheben (Langhantel)|beinbeuger|gesaess,ur|lh|weight|Beine|RDL,Romanian Deadlift
+rdl-kh|Rumänisches Kreuzheben (Kurzhantel)|beinbeuger|gesaess,ur|kh|weight|Beine|RDL
+rdl1-kh|Rumänisches Kreuzheben einbeinig (Kurzhantel)|beinbeuger|gesaess|kh|weight|Beine|Single Leg RDL,RDL|1
+rdl1-kg|Rumänisches Kreuzheben einbeinig (Körpergewicht)|beinbeuger|gesaess|kg|reps|Beine|Single Leg RDL,RDL|1
+goodmorning|Good Morning (Langhantel)|beinbeuger|ur,gesaess|lh|weight|Beine|
+hipthrust|Hip Thrust (Langhantel)|gesaess|beinbeuger|lh|weight|Beine|Beckenheben
+becken|Beckenheben (Körpergewicht)|gesaess|beinbeuger|kg|reps|Beine|Glute Bridge
+becken1|Beckenheben einbeinig (Körpergewicht)|gesaess|beinbeuger|kg|reps|Beine|Glute Bridge|1
+nordic|Nordic Curls (Körpergewicht)|beinbeuger||kg|reps|Beine|Nordic Hamstring
+waden-kh|Wadenheben (Kurzhantel)|waden||kh|weight|Beine|Calf Raise
+waden1|Wadenheben einbeinig (Körpergewicht)|waden||kg|reps|Beine|Calf Raise|1
+wandsitz|Wandsitzen (Körpergewicht)|quad||kg|time|Beine|Wall Sit
+lp-schwarz|Beinpresse schwarz (Maschine)|quad|gesaess|ma|weight|Beine|Leg Press,Leg Press Schwarz
+lp1-schwarz|Beinpresse schwarz einbeinig (Maschine)|quad|gesaess|ma|weight|Beine|Single Leg Press,Single Leg Press Schwarz|1
+lp-grau|Beinpresse grau (Maschine)|quad|gesaess|ma|weight|Beine|Leg Press
+lp1-grau|Beinpresse grau einbeinig (Maschine)|quad|gesaess|ma|weight|Beine|Single Leg Press|1
+beinbeuger|Beinbeuger (Maschine)|beinbeuger||ma|weight|Beine|Beinbeuger-Maschine,Leg Curl
+plank|Unterarmstütz (Körpergewicht)|bauch|schultern|kg|time|Rumpf|Plank,Planks
+seitstuetz|Seitstütz (Körpergewicht)|bauch||kg|time|Rumpf|Side Plank|1
+deadbug|Dead Bug (Körpergewicht)|bauch||kg|reps|Rumpf|
+birddog|Bird Dog (Körpergewicht)|ur|bauch,gesaess|kg|reps|Rumpf|Vierfüßlerstand
+hollow|Hollow Hold (Körpergewicht)|bauch||kg|time|Rumpf|
+crunch|Crunches (Körpergewicht)|bauch||kg|reps|Rumpf|Bauchpresse
+beinheben|Beinheben hängend (Körpergewicht)|bauch|unterarme|kg|reps|Rumpf|Hanging Leg Raise
+rueckenstr|Rückenstrecker (Körpergewicht)|ur|gesaess,beinbeuger|kg|reps|Rumpf|Hyperextensions
+russian|Russian Twist (Kurzhantel)|bauch||kh|weight|Rumpf|
+suitcase|Suitcase Carry (Kurzhantel)|bauch|unterarme,trapez|kh|wtime|Rumpf|Koffer tragen|1
+pallof|Pallof Press (Kabel)|bauch||kabel|weight|Rumpf|
+farmer|Farmer's Walk (Kurzhantel)|unterarme|trapez,bauch,gesaess|kh|wtime|Rumpf|Farmers Walk,Bauerngang
+thruster|Thruster (Kurzhantel)|ganz|quad,schultern,gesaess,trizeps|kh|weight|Beine|
+burpees|Burpees (Körpergewicht)|ganz|brust,quad|kg|reps|Ausdauer|
+mountain|Mountain Climbers (Körpergewicht)|bauch|schultern,quad|kg|time|Ausdauer|
+deadhang|Dead Hang (Körpergewicht)|unterarme|ruecken|kg|time|Zug|Hängen
+laufband|Laufband|ausdauer||sonst|cardio|Ausdauer|
+laufband-r|Laufband rückwärts|ausdauer||sonst|cardio|Ausdauer|
+seil|Seilspringen|ausdauer|waden|sonst|cardio|Ausdauer|Springseil
+treppe|Treppensteiger|ausdauer||ma|cardio|Ausdauer|Stairmaster
+schlitten|Gewichtsschlitten|ausdauer|quad,gesaess|sonst|sled|Ausdauer|Sled
+shoulder-rehab|Shoulder Rehab|mobil|schultern|sonst|done|Reha|Schulter-Reha
+bruecke|Brücke (Körpergewicht)|mobil|ur|kg|time|Reha|Rückbeuge
+mob-huefte|Mobility – Hüfte|mobil||sonst|done|Reha|Mobilität,Hüfte
+mob-ober|Mobility – Oberkörper|mobil||sonst|done|Reha|Mobilität,Stretching,Brustöffner
+mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
+  const CATALOG = CAT_SRC.trim().split('\n').map(l => {
+    const [key, name, muscle, m2, equip, type, cat, al, uni] = l.split('|');
+    return { key, name, muscle, m2: m2 ? m2.split(',') : [], equip, type, cat, aliases: al ? al.split(',') : [], uni: uni === '1' };
+  });
+  const catByKey = k => CATALOG.find(x => x.key === k);
+  const low = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ß/g, 'ss').trim();
+  // Umbenennung der importierten Übungen (Oktober 2026, mit Landry abgestimmt)
+  const RENAME = {
+    'bp': 'bank-lh', 'mp': 'ohp-lh', 'dips': 'dips-ass', 'chin ups': 'chin-ass', 'rudern': 'rud-lh', 'einarmrudern': 'rud-1',
+    'freie latzugmaschine': 'latzug', 'facepulls': 'facepull', 'kreuzheben': 'dl', 'rdl': 'rdl-lh', 'single leg rdl': 'rdl1-kg',
+    'beinbeuger-maschine': 'beinbeuger', 'leg press schwarz': 'lp-schwarz', 'single leg press schwarz': 'lp1-schwarz',
+    'step up einbeinig': 'stepup-kg', 'planks': 'plank', 'brucke': 'bruecke', 'stretching': 'mob-ober'
+  };
+  const ADD_NOW = ['lp-grau', 'lp1-grau', 'stepup-kh', 'mob-huefte', 'mob-unter'];
+  const exFromCat = (k, id) => ({ id: id || 'c-' + k.key, ref: k.key, name: k.name, cat: k.cat, type: k.type, uni: k.uni, muscle: k.muscle, m2: [...k.m2], equip: k.equip, aliases: [] });
+  const adoptedRef = (state, k) => state.exercises.find(e => e.ref === k.key || low(e.name) === low(k.name));
+  function adopt(state, key) {
+    const k = catByKey(key); if (!k) return null;
+    const have = adoptedRef(state, k); if (have) return have;
+    const e = exFromCat(k); state.exercises.push(e); return e;
+  }
+  function migrateCatalog(s) {
+    if (s.settings.catalog1) return;
+    const used = id => s.sessions.some(x => x.items && x.items.some(i => i.ex === id));
+    for (const e of s.exercises) {
+      const key = RENAME[low(e.name)];
+      const k = key ? catByKey(key) : CATALOG.find(x => low(x.name) === low(e.name));
+      if (!k) continue;
+      if (key && low(e.name) !== low(k.name)) e.aliases = [...new Set([...(e.aliases || []), e.name])];
+      e.name = k.name; e.ref = k.key; e.muscle = k.muscle; e.m2 = [...k.m2]; e.equip = k.equip;
+      if (key === 'bruecke') e.cat = 'Reha';
+      if (key === 'mob-ober') {
+        const items = s.sessions.flatMap(x => (x.items || []).filter(i => i.ex === e.id));
+        if (items.every(i => !i.sets || !i.sets.length)) e.type = 'done';
+      }
+    }
+    for (const key of ADD_NOW) {
+      const k = catByKey(key);
+      if (key.startsWith('mob-') && !s.exercises.some(e => e.ref === 'mob-ober')) continue;
+      if (key.startsWith('lp') && !s.exercises.some(e => e.ref === 'lp-schwarz')) continue;
+      if (key === 'stepup-kh' && !s.exercises.some(e => e.ref === 'stepup-kg')) continue;
+      if (!adoptedRef(s, k)) s.exercises.push(exFromCat(k));
+    }
+    s.settings.catalog1 = true;
+    return used;
+  }
+  // Suche: alle Wörter müssen in Name, Suchbegriffen, Muskel oder Gerät vorkommen
+  function matches(e, q) {
+    const toks = low(q).split(/\s+/).filter(Boolean); if (!toks.length) return true;
+    const hay = low([e.name, ...(e.aliases || []), MUSCLES[e.muscle] || '', EQUIP[e.equip] || ''].join(' '));
+    return toks.every(t => hay.includes(t));
+  }
+
+  // ---------- Zeit: Sekunden oder Minuten ----------
+  // Gespeichert wird immer in Sekunden. Eingabe: „90“, „1,5“ oder „1:30“ je nach Einheit.
+  function parseTime(v, unit) {
+    const s = String(v ?? '').trim().replace(',', '.'); if (!s) return null;
+    const m = s.match(/^(\d+):(\d{1,2})$/); if (m) return Number(m[1]) * 60 + Number(m[2]);
+    if (!/^\d*\.?\d+$/.test(s)) return null;
+    return Math.round(Number(s) * (unit === 'min' ? 60 : 1));
+  }
+  function timeInput(sec, unit) {
+    if (!isNum(sec)) return '';
+    if (unit !== 'min') return String(sec);
+    return sec % 6 === 0 ? String(sec / 60).replace('.', ',') : `${Math.floor(sec / 60)}:${pad(sec % 60)}`;
+  }
+  const timeTxt = (v, unit) => unit === 'min' ? (v % 6 === 0 ? `${fmtW(v / 60)} Min.` : `${Math.floor(v / 60)}:${pad(v % 60)} Min.`) : secTxt(v);
+
+  // ---------- Trainingsstatistik ----------
+  const counted = s => s.kind === 'training' && (s.done || (s.items && s.items.length));
+  const sessMin = s => { if (!s.startedAt || !s.endedAt) return null; const m = (new Date(s.endedAt) - new Date(s.startedAt)) / 6e4; return m > 0 && m <= 240 ? Math.round(m) : null; };
+  const setCount = (ex, it) => ex && ex.type !== 'done' && ex.type !== 'cardio' ? (it.sets || []).filter(x => Object.values(x).some(v => v !== null && v !== undefined && v !== '')).length : 0;
+  // Sätze je Muskel: Hauptmuskel zählt ganz, Nebenmuskeln halb
+  function trainStats(state, a, b) {
+    const out = { n: 0, min: 0, minN: 0, vol: 0, sets: 0, muscles: {}, ex: new Map(), days: new Set() };
+    for (const s of state.sessions) {
+      if (s.date < a || s.date > b || !counted(s)) continue;
+      out.n++; out.days.add(s.date);
+      const m = sessMin(s); if (m !== null) { out.min += m; out.minN++; }
+      for (const it of s.items || []) {
+        const ex = exById(state, it.ex); if (!ex) continue;
+        const n = setCount(ex, it); out.sets += n;
+        if (ex.type === 'weight') for (const x of it.sets || []) if (isNum(x.w) && isNum(x.r)) out.vol += x.w * x.r;
+        if (n && ex.muscle && MUSCLES[ex.muscle]) {
+          out.muscles[ex.muscle] = (out.muscles[ex.muscle] || 0) + n;
+          for (const m2 of ex.m2 || []) out.muscles[m2] = (out.muscles[m2] || 0) + n / 2;
+        }
+        if (n || it.done || (it.sets && it.sets.length)) { const c = out.ex.get(ex.id) || { n: 0, last: '' }; c.n++; if (s.date > c.last) c.last = s.date; out.ex.set(ex.id, c); }
+      }
+    }
+    return out;
+  }
+  const radarOf = mus => RADAR.map(([l, ks]) => [l, ks.reduce((a, k) => a + (mus[k] || 0), 0)]);
+  // Rekorde: jedes Mal, wenn die Hauptkennzahl einer Übung den bisherigen Bestwert übertrifft
+  function records(state) {
+    const out = [];
+    for (const ex of state.exercises) {
+      const m = (METRICS[ex.type] || [])[0]; if (!m) continue;
+      let best = null;
+      for (const h of exHistory(state, ex.id)) {
+        const v = h.v[m[0]]; if (!isNum(v)) continue;
+        if (best !== null && (m[3] ? v < best : v > best)) out.push({ ex: ex.id, d: h.d, v, prev: best, m });
+        if (best === null || (m[3] ? v < best : v > best)) best = v;
+      }
+    }
+    return out.sort((x, y) => y.d.localeCompare(x.d));
+  }
+  // Wochenserie: aufeinanderfolgende Wochen mit mindestens einer Einheit bis zum Stichtag
+  function weekStreak(state, day) {
+    const wk = new Set(state.sessions.filter(s => counted(s) && s.date <= day).map(s => weekStart(s.date)));
+    let w = weekStart(day); if (!wk.has(w)) w = addDays(w, -7);
+    let n = 0; while (wk.has(w)) { n++; w = addDays(w, -7); }
+    return n;
+  }
+
+  // ---------- Gewichtete Gewohnheiten ----------
+  // Schwierigkeit 1–5 (Standard 3) -> Anteil am Wochenring, zusammen 100 %
+  const diffOf = h => Number.isInteger(h.diff) && h.diff >= 1 && h.diff <= 5 ? h.diff : 3;
+  function shares(habits) { const t = habits.reduce((a, h) => a + diffOf(h), 0); return new Map(habits.map(h => [h.id, t ? diffOf(h) / t : 0])); }
+
   // ---------- Training ----------
   const TYPES = {
     weight: 'Gewicht × Wdh.', assist: 'Gegengewicht × Wdh.', reps: 'Nur Wiederholungen',
@@ -315,9 +560,9 @@
     if (ex.type === 'done') return 'erledigt';
     if (!sets.length) return '';
     if (ex.type === 'cardio') return sets.map(s => [s.min ? `${fmtW(s.min)} Min.` : '', s.kmh ? `${fmtW(s.kmh)} km/h` : '', s.incl ? `Steigung ${s.incl}` : '', s.km ? `${fmtW(s.km)} km` : ''].filter(Boolean).join(', ')).join(' + ');
-    if (ex.type === 'time') return groupRuns(sets.map(s => s.s)).map(([v, n]) => `${n}× ${secTxt(v)}`).join(', ');
+    if (ex.type === 'time') return groupRuns(sets.map(s => s.s)).filter(([v]) => isNum(v)).map(([v, n]) => `${n}× ${timeTxt(v, ex.unit)}`).join(', ');
     if (ex.type === 'sled') return sets.map(s => `${fmtW(s.w)} kg × ${fmtW(s.m)} m`).join(', ');
-    if (ex.type === 'wtime') return sets.map(s => `${isNum(s.w) ? fmtW(s.w) + ' kg' : '? kg'} × ${isNum(s.s) ? secTxt(s.s) : '?'}`).join(', ');
+    if (ex.type === 'wtime') return sets.map(s => `${isNum(s.w) ? fmtW(s.w) + ' kg' : '? kg'} × ${isNum(s.s) ? timeTxt(s.s, ex.unit) : '?'}`).join(', ');
     if (ex.type === 'reps') return repsText(sets.map(s => s.r));
     // weight/assist: nach Gewicht gruppieren
     const groups = [];
@@ -380,7 +625,9 @@
     pad, iso, parseDay, addDays, diffDays, weekStart, monthStart, monthEnd, yearStart, quarterStart, todayStr, nowLocal, dayRange,
     num, fmt, fmtW, emptyState, validate, PHASES, T, dailyFirst, avg30, weightStatus, thresholds, navyFat, measurementDue,
     checkedDays, habitStats, targetAt, tempo, forecast, lockState, goalProgress, daysInYear, checkGoals, weekCount, TYPES, CATS, exById, nextNum, trainings, lastItem, pauseFor, setSummary,
-    METRICS, metricValues, exHistory, repRecords
+    METRICS, metricValues, exHistory, repRecords,
+    MUSCLES, RADAR, EQUIP, EQUIP_OFF, CATALOG, catByKey, low, adopt, adoptedRef, migrateCatalog, matches, parseTime, timeInput, timeTxt,
+    trainStats, radarOf, records, weekStreak, sessMin, counted, diffOf, shares
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
 })(typeof self !== 'undefined' ? self : this);

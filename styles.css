@@ -412,3 +412,60 @@ input.sw:checked::after{transform:translateX(20px);background:var(--on-accent)}
 .hl .tick{width:44px;height:44px;flex:none}
 /* Große Schrift: alles innerhalb der Seiten wird gleichmäßig größer */
 
+
+/* 2.6.0: Übungen finden, Statistik, gewichteter Ring */
+input[type=search]{width:100%;background:var(--s2);border:1px solid var(--line);border-radius:14px;padding:12px;min-height:48px;font-size:16px;-webkit-appearance:none;appearance:none}
+div.f{margin:0 0 14px}
+div.f>span{display:block;font-size:var(--f-s);color:var(--mu);margin:0 0 6px}
+.chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:8px 0 0;padding-bottom:2px}
+.chips::-webkit-scrollbar{display:none}
+.chips.wrap{flex-wrap:wrap;overflow:visible;margin:0}
+.chip{position:relative;flex:none;border:0;border-radius:999px;padding:0 14px;min-height:40px;display:inline-flex;align-items:center;background:var(--s2);color:var(--mu);font-weight:600;font-size:var(--f-s);cursor:pointer}
+.chip[aria-pressed=true],.chip:has(input:checked){background:var(--accent);color:var(--on-accent)}
+.chip input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.chip:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
+.pk{display:flex;flex-direction:column;gap:2px;min-width:0;text-align:left}
+.pick .tag{font-size:var(--f-xs);font-weight:650;color:var(--accent);flex:none;margin-left:10px;white-space:nowrap}
+:root[data-theme=light] .pick .tag{color:var(--tx)}
+h2.exh{margin:20px 0 2px;font-size:var(--f-m)}
+.exrow{padding:0;gap:2px}
+.exrow .rowbtn{display:flex;align-items:center;border:0;background:transparent;padding:12px 4px;text-align:left;min-height:52px;min-width:0}
+.star{border:0;background:transparent;color:var(--fa);width:44px;height:44px;display:grid;place-items:center;flex:none;padding:0}
+.star svg{fill:none}
+.star.on{color:var(--warn)}
+.star.on svg{fill:currentColor}
+.hint{margin:16px 4px}
+.quad{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.quad .tilebtn.act{min-height:104px;padding:12px}
+.quad .tilebtn.act .faint{font-size:var(--f-xs)}
+.mt{margin:0 0 4px}
+.mtile{background:var(--s1);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.mtile span{font-size:var(--f-s);color:var(--mu)}
+.mtile b{font-size:22px;font-weight:700;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mtile em{font-style:normal;font-size:var(--f-xs);color:var(--fa)}
+.radar{width:100%;max-width:400px;height:auto;display:block;margin:0 auto}
+.legend{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;font-size:var(--f-xs);color:var(--mu);margin:6px 0 0}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+.mbars{display:flex;flex-direction:column;gap:9px}
+.mbar{display:grid;grid-template-columns:112px 1fr 36px;align-items:center;gap:10px;font-size:var(--f-s)}
+.mbar i{height:10px;border-radius:5px;background:var(--s2);overflow:hidden}
+.mbar i b{display:block;height:100%;background:var(--accent);border-radius:5px}
+.mbar em{font-style:normal;text-align:right;color:var(--mu)}
+.card-row{background:var(--s1);border-radius:var(--r);padding:10px 14px}
+.mhead{margin:4px 0 6px}
+.streak{display:flex;align-items:baseline;gap:8px;margin:0 0 14px}
+.streak .flame{font-size:22px}
+.streak b{font-size:28px;font-weight:700}
+.streak span:last-child{color:var(--mu)}
+.mcal{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;text-align:center}
+.mcal .wd{font-size:var(--f-xs);color:var(--fa);font-weight:600;padding-bottom:2px}
+.cd{display:grid;place-items:center;aspect-ratio:1;border-radius:50%;font-size:var(--f-s);color:var(--mu);font-variant-numeric:tabular-nums}
+.cd.on{background:var(--accent);color:var(--on-accent);font-weight:700}
+.cd.mv{background:color-mix(in srgb,var(--sage) 45%,transparent);color:var(--tx)}
+.cd.now{box-shadow:inset 0 0 0 2px var(--tx)}
+.cd.fut{opacity:.4}
+.ring-row{align-items:center}
+.ring-ctl{display:flex;align-items:center;gap:10px;margin-top:6px}
+.ring-ctl select{min-height:40px;padding:6px 10px;flex:1;min-width:0;font-size:15px}
+.ring-ctl .share{min-width:46px;text-align:right}
+.srow.off select{opacity:.45}
