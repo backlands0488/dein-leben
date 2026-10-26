@@ -134,6 +134,7 @@
   function render() {
     applyTheme();
     if (!S) { $app.innerHTML = viewWelcome(); return; }
+    const hn = C.tickHard(S, today()); if (hn.length) { S.notices.push(...hn); save(); }
     const t = top();
     saveScroll();
     let html;
@@ -212,12 +213,14 @@
     let out = `<div class="ph"><h1>${DAYS[pd.getDay()]}</h1><span class="meta num">${pd.getDate()}. ${MONTHS[pd.getMonth()]}</span></div>`;
     for (const [i, n] of (S.notices || []).entries()) out += `<div class="notice good row"><span class="grow">${esc(n)}</span><button class="btn sm ghost" data-act="dismiss" data-arg="${i}">OK</button></div>`;
     const running = S.sessions.find(s => s.kind === 'training' && !s.done);
+    for (const v of C.hardViolations(S)) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="habits"><span class="grow">${esc(v)}</span><b>›</b></button>`;
     if (running) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="session:${running.id}"><span class="grow">Einheit #${String(running.num).padStart(3, '0')} läuft</span><b>›</b></button>`;
     if (rh.length) {
-      const wk = weekProgress(rh, rs, d);
+      const wk = weekProgress(rh, rs, d), rsN = ringStreak(d);
       const inner = wk.full ? CHECK : `<b class="num" style="font-size:18px">${Math.round(wk.frac * 100)}%</b>`;
       out += `<div class="hero-b">${ring(wk.frac, 76, 9, 'var(--accent)', inner, wk.n ? wk.soll : null)}
-        <div><div class="hero-sub">Diese Woche</div><div class="hero-num num">Soll ${Math.round(wk.soll * 100)} %</div><div class="hero-sub num">heute ${done} von ${rh.length}</div></div></div>`;
+        <div><div class="hero-sub">Diese Woche</div><div class="hero-num num">Soll ${Math.round(wk.soll * 100)} %</div><div class="hero-sub num">heute ${done} von ${rh.length}</div>
+        <div class="hero-streak num" aria-label="Wochen in Folge mit vollem Wochenring">🔥 <b>${rsN}</b> ${rsN === 1 ? 'Woche' : 'Wochen'}</div></div></div>`;
     }
     if (ws.due) out += `<div class="entry-b"><input type="text" inputmode="decimal" placeholder="Gewicht heute, kg" id="quickKg" aria-label="Gewicht in kg"><button class="fab" data-act="quickWeight" aria-label="Gewicht speichern">${CHECK}</button></div>`;
     if (S.settings.heightCm && C.measurementDue(S.measurements, d)) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="measure"><span class="grow">Umfänge messen</span><b>›</b></button>`;
@@ -252,6 +255,21 @@
     for (const r of rows) { frac += sh.get(r.h.id) * r.D / r.P; soll += sh.get(r.h.id) * Math.min(1, r.E / r.P); }
     return { n: rows.length, frac, soll, full: rows.length > 0 && rows.every(r => r.D >= r.P) };
   }
+  // Serie des Gesamtwochenziels: Wochen in Folge mit vollem Wochenring (jede Gewohnheit im Ring hat ihr Wochensoll erfüllt).
+  // Vergangene Wochen mit den Gewohnheiten, die damals liefen; die laufende Woche zählt erst, wenn sie voll ist.
+  function ringStreak(d) {
+    const all = S.habits.filter(inRing), days = new Map(all.map(h => [h.id, C.checkedDays(S, h)]));
+    const full = ws => {
+      const we = C.addDays(ws, 6), end = we < d ? we : d;
+      const hs = all.filter(h => h.start <= we && (!h.archived || (h.archivedOn && h.archivedOn >= we)));
+      const wp = weekProgress(hs, hs.map(h => ({ days: days.get(h.id) })), end);
+      return wp.n > 0 && wp.full;
+    };
+    let w = C.weekStart(d), n = 0;
+    if (!full(w)) w = C.addDays(w, -7);
+    while (n < 1000 && full(w)) { n++; w = C.addDays(w, -7); }
+    return n;
+  }
   // Tagespunkte der Woche: Form, Beschriftung und Häkchen nach Einstellung
   function weekBars(h, st, d) {
     const ws = C.weekStart(d), shape = setting('dotShape', 'bar'), lab = setting('dotLabel', 'none'), chk = shape !== 'bar' && flag('dotCheck');
@@ -283,7 +301,8 @@
   }
   function streakTxt(h, st) {
     const weekly = h.type === 'weekly';
-    return `<b>${st.cur}</b> ${weekly ? (st.cur === 1 ? 'Woche' : 'Wochen') : (st.cur === 1 ? 'Tag' : 'Tage')}${weekly ? ` · ${st.week.n}/${st.week.t}` : ''}`;
+    const hs = C.hardStatus(S, h, today()), buf = hs && hs.buf;
+    return `<b>${st.cur}</b> ${weekly ? (st.cur === 1 ? 'Woche' : 'Wochen') : (st.cur === 1 ? 'Tag' : 'Tage')}${weekly ? ` · ${st.week.n}/${st.week.t}` : ''}${buf ? ` · <span class="buf ${buf.rest > 0 ? '' : 'low'}" title="Puffer bis 98 %">Puffer ${Math.max(0, buf.rest)}</span>` : ''}`;
   }
   const tickBtn = (h, on, d) => `<button class="tick ${on ? 'on' : ''}" data-act="${h.link === 'sport' ? 'sportSheet' : 'toggle'}" data-arg="${h.id}:${d}" aria-label="${esc(h.name)} heute abhaken" aria-pressed="${on}">${CHECK}</button>`;
   function habitTile(h, st, d) {
@@ -322,12 +341,83 @@
     return `${header(`${esc(h.emoji)} ${esc(h.name)}`, `${infoBtn('habit')}<button class="iconbtn" data-act="open" data-arg="habitEdit:${h.id}" aria-label="Bearbeiten">${PEN}</button>`)}
       <div style="--hc:${h.color}">
       <div class="pills" style="margin:0 0 14px">${pills.map(p => `<span class="pill">${p}</span>`).join('')}</div>
-      ${goal}
+      ${goal}${hardCard(h)}
+      ${h.plan ? `<div class="card plan"><span class="lbl">Wenn-dann-Plan</span><p>${esc(h.plan)}</p></div>` : ''}
       <div class="stats">${q('Gesamt', st.total)}${q('Serie', st.cur, unit)}${q('Beste', st.best, unit)}</div>
       <div class="stats" style="margin-top:8px">${q('Woche', wk)}${q('Monat', mo)}${q('Jahr', yr)}</div>
       <div class="card" style="margin-top:12px">${calendar(h, st)}</div>
       <div class="card"><div class="lbl" style="margin:0 0 10px">${y}</div>${heatmap(h, st, y)}</div>
       </div>`;
+  }
+  // ---------- Feste Regeln für schwere Gewohnheiten ----------
+  const dMini = s => `${s.slice(8, 10)}.${s.slice(5, 7)}.${s.slice(2, 4)}`;
+  const missTxt = (b, n) => b.unit === 'Tage' ? (n === 1 ? 'Fehltag' : 'Fehltage') : (n === 1 ? 'Einheit' : 'Einheiten');
+  const tomorrow = () => C.addDays(today(), 1);
+  // Frühester Tag, ab dem wieder eine schwere oder sehr schwere Gewohnheit möglich ist, wenn alles nach Plan läuft
+  function unlockAt(st) {
+    if (!st) return null;
+    if (st.phase === 'arch') return st.until;
+    if (st.phase === 4) return st.buf && st.buf.at;
+    if (st.phase === 5) {
+      const d1 = st.pend ? C.addDays(C.addMonths(st.p.start5, C.HARD.m5), -1) : st.ok ? today() : st.buf && st.buf.at;
+      return d1 ? C.addDays(C.addMonths(d1, C.HARD.m4), -1) : null;
+    }
+    return null;
+  }
+  function hardCard(h) {
+    const st = C.hardStatus(S, h, today()); if (!st || st.phase === 'done') return '';
+    const q = (lbl, v) => `<div class="stat"><b class="num">${v}</b><span>${lbl}</span></div>`;
+    const head = (t, sub) => `<div class="row between" style="margin:0 0 10px"><b>🔒 ${t}</b>${infoBtn('hard')}</div>${sub ? `<p class="faint small" style="margin:-6px 0 10px">${sub}</p>` : ''}`;
+    if (st.phase === 'arch') return `<div class="card hard">${head('Sperre läuft weiter', `Neue schwere oder sehr schwere Gewohnheit ab ${dNum(st.until)}.`)}</div>`;
+    if (st.phase === 5 && st.pend) return `<div class="card hard">${head('Sehr schwer · Bedenkzeit', 'Bis heute Abend kannst du die Stufe noch ändern.')}
+      <div class="stats">${q('Beginn', dMini(st.p.start5))}${q('Fest bis mind.', dMini(st.from))}${q('Neue schwere', dMini(unlockAt(st)))}</div></div>`;
+    const b = st.buf, r = Math.max(0, b.rest);
+    if (st.phase === 5) return `<div class="card hard">${head('Sehr schwer', st.ok ? 'Mindestens 98 % geschafft: Du darfst auf „schwer“ herabstufen.' : '')}
+      <div class="stats">${q(`Puffer · ${missTxt(b, r)}`, r)}${q(st.ok ? 'Herabstufen' : 'Herabstufbar ab', st.ok ? 'jetzt' : b.at ? dMini(b.at) : '–')}${q('Neue schwere', unlockAt(st) ? dMini(unlockAt(st)) : '–')}</div></div>`;
+    return `<div class="card hard">${head('Bewährung · schwer', '')}
+      <div class="stats">${q(`Puffer · ${missTxt(b, r)}`, r)}${q('Bestanden ab', b.at ? dMini(b.at) : '–')}${q('Schwer seit', dMini(st.p.start4))}</div></div>`;
+  }
+  // Warum Stufen gesperrt sind, in einer Zeile
+  function gateNote(h) {
+    const g = C.diffGate(S, h, today()), st = g.st;
+    if (st && st.phase === 5 && !st.pend) return st.ok ? 'Mindestens 98 % geschafft: „schwer“ ist jetzt möglich.' : `Fest auf „sehr schwer“ bis mindestens ${dNum(st.from)}, danach mit mindestens 98 %.`;
+    if (st && st.phase === 4) return `Bewährung: bleibt „schwer“, bis die letzten 2 Monate mindestens 98 % ergeben.`;
+    if (g.blocker) { const u = unlockAt(C.hardStatus(S, g.blocker, today())); return `4 und 5 gesperrt, bis „${esc(g.blocker.name)}“ die Bewährung besteht${u ? ` (frühestens ${dNum(u)})` : ''}.`; }
+    if (g.five) return `5 gesperrt: „${esc(g.five.name)}“ ist schon sehr schwer.`;
+    return '';
+  }
+  const diffOpts = (h, cur) => { const g = C.diffGate(S, h, today()); return DIFF.map((l, i) => `<option value="${i + 1}" ${cur === i + 1 ? 'selected' : ''} ${g.ok.has(i + 1) ? '' : 'disabled'}>${i + 1} · ${l}${g.ok.has(i + 1) ? '' : ' · gesperrt'}</option>`).join(''); };
+  // Hinweise beim Festlegen; f = { diff, type, target, start } aus dem Formular
+  function hardHint(h, f) {
+    if (f.diff < 4) return '';
+    if (h && C.diffOf(h) === f.diff) return '';
+    if (f.diff === 4) return `<div class="hard-hint"><b class="t">Schwer</b>Keine feste Bindung. Prüffrage: Schaffst du sie auch an einem schlechten Tag?</div>`;
+    const s5 = h ? tomorrow() : (f.start > tomorrow() ? f.start : tomorrow());
+    const tmp = { id: '_tmp', type: f.type === 'weekly' ? 'weekly' : 'daily', target: f.target || 3, targets: [], start: s5 };
+    const b = C.bufferInfo({ habits: [tmp], checks: {}, sessions: [] }, tmp, s5, C.HARD.m5, today());
+    const from = C.addMonths(s5, C.HARD.m5), until = C.addMonths(s5, C.HARD.block);
+    const fake = { phase: 5, pend: true, p: { start5: s5 } };
+    return `<div class="hard-hint"><b class="t">Sehr schwer ist verbindlich</b><ul>
+      <li>Beginn ${dNum(s5)}, fest bis mindestens <b>${dNum(from)}</b>.</li>
+      <li>Herabstufen erst mit mindestens 98 %: in 4 Monaten höchstens <b>${b.miss} ${missTxt(b, b.miss)}</b>${tmp.type === 'weekly' ? ' (verpasste Einheiten)' : ''}.</li>
+      <li>Dann 2 Monate „schwer“, wieder mindestens 98 %. Erst danach eine weitere schwere oder sehr schwere, frühestens <b>${dNum(unlockAt(fake))}</b>.</li>
+      <li>Archivieren geht, die Sperre bleibt bis ${dNum(until)}. Löschen nur bis zum Beginn.</li></ul>
+      <div class="lbl">Prüffragen</div><ul>
+      <li>Schaffst du sie auch an einem schlechten Tag, krank oder auf Reisen?</li>
+      <li>Was ist dein fester Auslöser? Trag ihn als Wenn-dann-Plan ein.</li>
+      <li>Willst du dich wirklich die nächsten 4 Monate ohne Ausnahme daran binden?</li></ul></div>`;
+  }
+  function readHardForm() {
+    const v = id => document.getElementById(id);
+    return { diff: Number((v('hDiff') || {}).value) || 3, type: v('hType') ? v('hType').value : null, target: v('hTarget') ? Math.round(C.num(v('hTarget').value) || 3) : 3, start: v('hStart') ? v('hStart').value : today() };
+  }
+  function updateHardHint() {
+    const el = document.getElementById('hHint'); if (!el) return;
+    const id = el.dataset.id || null, h = id ? S.habits.find(x => x.id === id) : null, f = readHardForm();
+    if (h && h.link === 'sport') f.type = 'weekly';
+    const st = document.getElementById('hStart');
+    if (st && !h) { const nf = f.diff === 5; st.min = nf ? tomorrow() : ''; if (nf && st.value < tomorrow()) { st.value = tomorrow(); f.start = st.value; } }
+    el.innerHTML = hardHint(h, f);
   }
   function calendar(h, st) {
     const d = today(); const m = ui.cal[h.id] || C.monthStart(d);
@@ -361,29 +451,41 @@
   }
   function targetFields(h) {
     const cur = h ? C.targetAt(h, C.weekStart(today())) : 3;
-    return `<div class="fields"><label class="f"><span>Mal pro Woche</span><input type="text" inputmode="numeric" id="hTarget" value="${cur || 3}"></label>
+    return `<div class="fields"><label class="f"><span>Mal pro Woche</span><input type="text" inputmode="numeric" id="hTarget" data-input="hardHint" value="${cur || 3}"></label>
       ${h && h.type === 'weekly' ? `<label class="f"><span>Änderung gilt</span><select id="hTargetFrom"><option value="now">ab dieser Woche</option><option value="all">rückwirkend für alle Wochen</option></select></label>` : ''}</div>
       ${h && h.type === 'weekly' ? '<p class="faint small" style="margin-top:-6px">„Ab dieser Woche“ lässt deine bisherigen Serien und Quoten unverändert.</p>' : '<p class="faint small" style="margin-top:-6px">Nur relevant bei „X-mal pro Woche“.</p>'}`;
   }
   function screenHabitEdit({ id }) {
     const h = id ? S.habits.find(x => x.id === id) : null;
-    const v = h || { name: '', emoji: '✓', color: COLORS[3], type: 'daily', target: 3, start: today() };
+    const dr = ui.habitDraft && !ui.habitDraft.ringOnly && (ui.habitDraft.id || null) === (id || null) ? ui.habitDraft : null;
+    const base = h || { name: '', emoji: '✓', color: COLORS[3], type: 'daily', target: 3, start: today(), diff: 3, plan: '' };
+    const v = dr ? { ...base, name: dr.name, emoji: dr.emoji, start: dr.start, plan: dr.plan, diff: dr.diff, type: dr.typeVal === 'weekly' ? 'weekly' : dr.typeVal ? 'daily' : base.type, kind: dr.typeVal ? (dr.typeVal === 'verzicht' ? 'verzicht' : undefined) : base.kind } : base;
     ui.draftColor = ui.draftColor || v.color;
+    const st = h ? C.hardStatus(S, h, today()) : null, bound = C.hardBound(st), full = !h && C.activeCount(S) >= C.HARD.maxActive;
+    const diff = dr ? dr.diff : C.diffOf(v), note = gateNote(h);
+    const ftype = v.kind === 'verzicht' ? 'verzicht' : v.type;
     return `${header(h ? 'Gewohnheit bearbeiten' : 'Neue Gewohnheit')}
+      ${full ? `<div class="notice due">Schon ${C.HARD.maxActive} aktive Gewohnheiten. Archiviere erst eine, dann kannst du eine neue anlegen.</div>` : ''}
       <label class="f"><span>Name</span><input type="text" id="hName" value="${esc(v.name)}" placeholder="Ich lese heute 10 Seiten"></label>
+      <label class="f"><span>Wenn-dann-Plan (optional)</span><input type="text" id="hPlan" value="${esc(v.plan || '')}" placeholder="Wenn ich vom Frühstück aufstehe, dann …"></label>
+      <label class="f"><span class="row between">Schwierigkeit ${infoBtn('hard')}</span><select id="hDiff" data-change="hardHint">${diffOpts(h, diff)}</select></label>
+      ${note ? `<p class="faint small" style="margin:-6px 0 12px">${note}</p>` : ''}
+      <div id="hHint" data-id="${h ? h.id : ''}">${hardHint(h, { diff, type: ftype, target: h ? C.targetAt(h, C.weekStart(today())) : 3, start: v.start })}</div>
       <div class="fields"><label class="f"><span>Symbol (Emoji)</span><input type="text" id="hEmoji" value="${esc(v.emoji)}"></label>
-      <label class="f"><span>Beginn</span><input type="date" id="hStart" value="${v.start}"></label></div>
+      <label class="f"><span>Beginn</span><input type="date" id="hStart" data-change="hardHint" value="${v.start}" ${!h && diff === 5 ? `min="${tomorrow()}"` : ''}></label></div>
       ${h && h.link === 'sport' ? `<p class="faint small">Wird automatisch durch deine Trainings abgehakt. Die Art bleibt deshalb „X-mal pro Woche“.</p>${targetFields(h)}` : ''}
       ${h && h.link === 'weightgoal' ? `<p class="faint small">Verknüpft mit deinem Gewicht: Ist der 30-Tage-Durchschnitt am Ziel oder der Stichtag vorbei, wird die Gewohnheit archiviert. Den Namen passt du bei Bedarf oben selbst an.</p>
       <div class="fields"><label class="f"><span>Zielgewicht (kg)</span><input type="text" inputmode="decimal" id="hGoalKg" value="${C.fmt(h.goal.kg)}"></label>
       <label class="f"><span>Stichtag</span><input type="date" id="hGoalDate" value="${h.goal.deadline}"></label></div>` : ''}
       ${h && h.link ? '' : `
-      <div class="fields"><label class="f"><span>Art</span><select id="hType"><option value="daily" ${v.type === 'daily' && v.kind !== 'verzicht' ? 'selected' : ''}>Täglich</option><option value="verzicht" ${v.kind === 'verzicht' ? 'selected' : ''}>Täglich (Verzicht)</option><option value="weekly" ${v.type === 'weekly' ? 'selected' : ''}>X-mal pro Woche</option></select></label></div>
+      <div class="fields"><label class="f"><span>Art</span><select id="hType" data-change="hardHint" ${bound ? 'disabled' : ''}><option value="daily" ${v.type === 'daily' && v.kind !== 'verzicht' ? 'selected' : ''}>Täglich</option><option value="verzicht" ${v.kind === 'verzicht' ? 'selected' : ''}>Täglich (Verzicht)</option><option value="weekly" ${v.type === 'weekly' ? 'selected' : ''}>X-mal pro Woche</option></select></label></div>
       ${targetFields(h)}`}
+      ${bound ? `<p class="faint small" style="margin:-6px 0 12px">Während der Bindung bleibt die Art fest und das Wochenziel kann nicht sinken.</p>` : ''}
       <label class="f"><span>Farbe</span><div class="swatches">${COLORS.map(c => `<button class="swatch" style="background:${c}" aria-pressed="${c === ui.draftColor}" data-act="color" data-arg="${c}" aria-label="Farbe ${c}"></button>`).join('')}</div></label>
-      <button class="btn primary block" data-act="saveHabit" data-arg="${h ? h.id : ''}">Speichern</button>
+      <button class="btn primary block" data-act="saveHabit" data-arg="${h ? h.id : ''}" ${full ? 'disabled' : ''}>Speichern</button>
       ${h ? `<div style="height:10px"></div><button class="btn ghost block" data-act="archiveHabit" data-arg="${h.id}">${h.archived ? 'Wieder aktivieren' : 'Archivieren'}</button>
-      <div style="height:10px"></div><button class="btn danger block" data-act="deleteHabit" data-arg="${h.id}">Löschen</button>` : ''}`;
+      <div style="height:10px"></div><button class="btn danger block" data-act="deleteHabit" data-arg="${h.id}" ${bound ? 'disabled' : ''}>Löschen</button>
+      ${bound ? '<p class="faint small" style="margin:8px 4px">Löschen ist während der Bindung nicht möglich.</p>' : ''}` : ''}`;
   }
 
   // ===== TRAINING =====
@@ -932,7 +1034,7 @@
       <div class="opt"><label class="lbl" for="wLines">Markierungen in kg</label><input type="text" id="wLines" inputmode="decimal" value="${weightLines().map(C.fmtW).join(' ')}" data-change="weightLines" placeholder="z. B. 99 92 88"></div>
       <div class="opt"><label class="lbl" for="hCm">Körpergröße in cm</label><input type="text" id="hCm" inputmode="decimal" value="${S.settings.heightCm || ''}" data-change="height" placeholder="cm"></div></div>
       <p class="faint small" id="persist" style="margin:18px 0 4px">…</p>
-      <p class="faint small" style="margin:0">Dein Leben 2.6.0</p>`;
+      <p class="faint small" style="margin:0">Dein Leben 2.7.0</p>`;
   }
   const DEFAULTS = { dotShape: 'bar', dotLabel: 'none', heuteView: 'tiles', trainStart: 'ask', weightRange: 'auto', backupDays: 7 };
   const iconOf = k => `<span class="sn"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg></span>`;
@@ -971,16 +1073,19 @@
     const a = activeHabits(), z = S.habits.filter(h => h.archived), last = a.length - 1;
     const open = h => `<button class="row grow rowbtn" data-act="open" data-arg="habit:${h.id}">${emoOf(h)}<b class="grow">${esc(h.name)}</b></button>`;
     return `${header('Gewohnheiten')}
-      <button class="btn primary block xl" data-act="open" data-arg="habitEdit">Neue Gewohnheit</button>
+      <button class="btn primary block xl" data-act="open" data-arg="habitEdit" ${a.length >= C.HARD.maxActive ? 'disabled' : ''}>Neue Gewohnheit</button>
+      <p class="faint small num" style="margin:8px 4px 0">${a.length} von ${C.HARD.maxActive} aktiv${a.length >= C.HARD.maxActive ? ' · für eine neue erst eine archivieren' : ''}</p>
       ${a.length ? `<div class="lbl mon">Reihenfolge auf „Heute“</div><div class="wlist">${a.map((h, i) => `<div class="srow">${open(h)}${upDown('moveHabit', i, last, esc(h.name))}</div>`).join('')}</div>` : ''}
       ${z.length ? `<div class="lbl mon">Archiviert</div><div class="wlist">${z.map(h => `<div class="srow">${open(h)}<span class="chev">›</span></div>`).join('')}</div>` : ''}`;
   }
   const DIFF = ['Leicht', 'Eher leicht', 'Mittel', 'Schwer', 'Sehr schwer'];
   function screenRing() {
     const a = activeHabits(), ex = setting('ringExclude', []), sh = C.shares(a.filter(inRing));
+    const notes = [...new Set(a.map(h => gateNote(h)).filter(Boolean))];
     return `${header('Wochenring', infoBtn('ring'))}
+      ${notes.length ? `<p class="faint small" style="margin:0 4px 12px">${notes.join('<br>')}</p>` : ''}
       <div class="wlist">${a.map(h => { const on = !ex.includes(h.id); return `<div class="srow ring-row ${on ? '' : 'off'}">${emoOf(h)}<span class="grow" style="min-width:0"><b>${esc(h.name)}</b>
-        <span class="ring-ctl"><select data-change="habitDiff" data-arg="${h.id}" aria-label="Schwierigkeit von ${esc(h.name)}" ${on ? '' : 'disabled'}>${DIFF.map((l, i) => `<option value="${i + 1}" ${C.diffOf(h) === i + 1 ? 'selected' : ''}>${i + 1} · ${l}</option>`).join('')}</select>
+        <span class="ring-ctl"><select data-change="habitDiff" data-arg="${h.id}" aria-label="Schwierigkeit von ${esc(h.name)}" ${on ? '' : 'disabled'}>${diffOpts(h, C.diffOf(h))}</select>
         <b class="num share">${on ? Math.round(sh.get(h.id) * 100) : 0} %</b></span></span>
         <input type="checkbox" class="sw" ${on ? 'checked' : ''} data-change="ringToggle" data-arg="${h.id}" aria-label="${esc(h.name)} im Wochenring zählen"></div>`; }).join('')}</div>`;
   }
@@ -1097,6 +1202,11 @@
     ring: ['Gewichtung', () => `<p><b>Schwierigkeit 1–5</b> legt fest, wie stark eine Gewohnheit den Wochenring füllt. Die Anteile ergeben zusammen immer 100 %.</p>
       <p><b>Rechnung:</b> Jede Gewohnheit trägt ihren Anteil × ihre Erfüllung bei. Beispiel: Sport 3× pro Woche mit 50 %, einmal erledigt → 1/3 × 50 % ≈ 17 %.</p>
       <p><b>Ausgeschaltet:</b> bleibt auf „Heute“, zählt aber nicht im Ring.</p>`],
+    hard: ['Feste Regeln', () => `<p><b>Höchstens ${C.HARD.maxActive}</b> aktive Gewohnheiten, davon <b>eine</b> sehr schwere (Stufe 5).</p>
+      <p><b>Sehr schwer</b> bleibt mindestens 4 Monate. Herabstufen auf „schwer“, sobald die letzten 4 Monate zu mindestens 98 % erfüllt sind.</p>
+      <p><b>Bewährung:</b> danach 2 Monate „schwer“, wieder mindestens 98 %. Bis dahin keine weitere schwere oder sehr schwere Gewohnheit.</p>
+      <p><b>Puffer:</b> so viele Fehltage (bei „X-mal pro Woche“: verpasste Einheiten) erlaubt die 98-%-Grenze noch. Verfehlt? Das Fenster rollt weiter, ein Ausrutscher verschiebt den Termin, statt alles zurückzusetzen.</p>
+      <p><b>Bedenkzeit:</b> Eine neue sehr schwere beginnt frühestens morgen; bis dahin lässt sie sich zurücknehmen. Archivieren geht später, die Sperre bleibt dann 6 Monate ab Beginn.</p>`],
     tstats: ['Trainingsstatistik', () => `<p><b>Vergleich:</b> der gleich lange Zeitraum direkt davor.</p>
       <p><b>Sätze:</b> Sätze mit mindestens einem Wert. Hauptmuskel zählt ganz, Nebenmuskeln halb. Ausdauer und Mobilität zählen nicht.</p>
       <p><b>Dauer:</b> nur Einheiten, die in der App gestartet und mit „Fertig“ beendet wurden, höchstens 4 Stunden je Einheit. Importierte Einheiten haben keine Uhrzeit.</p>
@@ -1105,6 +1215,18 @@
     ex: ['Kennzahlen', () => `<p><b>Geschätztes 1RM:</b> Epley-Formel aus dem besten Satz, ab etwa 12 Wiederholungen ungenauer.</p><p><b>Volumen:</b> Gewicht × Wiederholungen über alle Sätze.</p><p><b>Gegengewicht:</b> Achse umgekehrt, weniger Hilfe liegt oben, weil es der Fortschritt ist.</p><p><b>Gelber Punkt:</b> Bestwert.</p>`]
   };
   const SHEETS = {
+    hardConfirm: () => {
+      const f = ui.habitDraft; if (!f) return '';
+      const h = f.id ? S.habits.find(x => x.id === f.id) : null, s5 = h ? tomorrow() : f.start;
+      const fake = { phase: 5, pend: true, p: { start5: s5 } }, plan = h && f.ringOnly ? h.plan : f.plan;
+      const kv = (k, v) => `<div class="kv num"><span>${k}</span><b>${v}</b></div>`;
+      return `<h3>Sehr schwer – verbindlich?</h3><div style="margin:0 0 14px">
+        ${kv('Gewohnheit', esc(f.ringOnly ? h.name : f.name))}${kv('Beginn', dNum(s5))}${kv('Fest bis mindestens', dNum(C.addMonths(s5, C.HARD.m5)))}
+        ${kv('Neue schwere frühestens', dNum(unlockAt(fake)))}${kv('Wenn-dann-Plan', plan ? '✓' : 'fehlt noch')}</div>
+        <p class="faint small" style="margin:0 4px 14px">Bis zum Beginn kannst du die Entscheidung zurücknehmen. Danach gelten die Regeln ohne Ausnahme.</p>
+        <button class="btn primary block" data-act="hardCommit">Verbindlich festlegen</button>
+        <button class="btn ghost block" data-act="closeSheet">Noch einmal überlegen</button>`;
+    },
     info: ({ sid }) => `<h3>${INFOS[sid][0]}</h3><div class="ex-txt">${INFOS[sid][1]()}</div><button class="btn block" data-act="closeSheet">Verstanden</button>`,
     infoWeight: () => {
       const d = today(), ws = C.weightStatus(S.weights, d), th = C.thresholds(ws.phase, ws), tp = C.tempo(ws.daily, d);
@@ -1130,6 +1252,62 @@
         <div style="height:12px"></div><button class="btn block" data-act="open" data-arg="exEdit::${sid}">Eigene Übung anlegen</button><button class="btn ghost block" data-act="closeSheet">Schließen</button>`;
     }
   };
+
+  // ---------- Gewohnheit speichern (mit festen Regeln) ----------
+  function readHabitForm(a) {
+    const g = id => document.getElementById(id), t = g('hType'), tIn = g('hTarget'), from = g('hTargetFrom');
+    return {
+      id: a || null, name: g('hName').value.trim(), emoji: g('hEmoji').value.trim() || '✓', plan: (g('hPlan') || {}).value ? g('hPlan').value.trim() : '',
+      start: g('hStart').value || today(), color: ui.draftColor, typeVal: t && !t.disabled ? t.value : null,
+      target: tIn ? Math.max(1, Math.min(7, Math.round(C.num(tIn.value) || 3))) : null, targetFrom: from ? from.value : null,
+      goalKg: g('hGoalKg') ? C.num(g('hGoalKg').value) : null, goalDate: g('hGoalDate') ? g('hGoalDate').value : null,
+      diff: Number((g('hDiff') || {}).value) || 3
+    };
+  }
+  // Stufe setzen und Bindung führen; Erlaubnis prüft der Aufrufer
+  function setDiff(h, d) {
+    const old = C.diffOf(h), p = h.prob;
+    h.diff = d;
+    if (d === 5 && old !== 5) h.prob = { start5: h.start > tomorrow() ? h.start : (S.habits.includes(h) ? tomorrow() : h.start) };
+    else if (old === 5 && d < 5 && p && !p.done) { if (today() < p.start5) delete h.prob; else if (d === 4) p.start4 = today(); }
+  }
+  function commitHabit(f, confirmed) {
+    const h0 = f.id ? S.habits.find(x => x.id === f.id) : null;
+    if (f.ringOnly) {
+      const g = C.diffGate(S, h0, today()); if (!h0 || !g.ok.has(f.diff)) { toast('Diese Stufe ist gerade gesperrt.'); return false; }
+      setDiff(h0, f.diff); save(); ui.habitDraft = null; render(); toast('Sehr schwer ab morgen'); return true;
+    }
+    if (!f.name) { toast('Gib der Gewohnheit einen Namen.'); return false; }
+    if (!h0 && C.activeCount(S) >= C.HARD.maxActive) { toast(`Höchstens ${C.HARD.maxActive} aktive Gewohnheiten. Archiviere erst eine.`); return false; }
+    const g = C.diffGate(S, h0, today());
+    if (!g.ok.has(f.diff)) { toast('Diese Schwierigkeit ist gerade gesperrt.'); return false; }
+    if (C.hardBound(g.st) && h0) {
+      const curT = C.targetAt(h0, C.weekStart(today()));
+      if (h0.type === 'weekly' && f.target && f.target < curT) { toast('Während der Bindung kann das Wochenziel nicht sinken.'); return false; }
+    }
+    if (h0 && h0.link === 'weightgoal' && (!f.goalKg || f.goalKg < 30 || f.goalKg > 300)) { toast('Prüfe das Zielgewicht.'); return false; }
+    if (h0 && h0.link === 'weightgoal' && !f.goalDate) { toast('Gib einen Stichtag an.'); return false; }
+    if (h0 && f.diff === 4 && C.diffOf(h0) === 5 && C.hardBound(g.st) && !confirm('Auf „schwer“ herabstufen? Danach folgen 2 Monate Bewährung mit mindestens 98 %.')) return false;
+    const newFive = f.diff === 5 && !(h0 && C.diffOf(h0) === 5);
+    if (newFive && !h0 && f.start < tomorrow()) f.start = tomorrow();
+    if (newFive && !confirmed) { ui.habitDraft = f; openSheet({ name: 'hardConfirm' }); return false; }
+    const a = f.id, h = h0 || { id: uid('h'), link: null, archived: false, created: today() };
+    h.name = f.name; h.emoji = f.emoji; h.plan = f.plan || undefined;
+    h.start = f.start; h.color = f.color || h.color || COLORS[3];
+    const newT = f.target, wasWeekly = h.type === 'weekly';
+    if (f.typeVal) { const v = f.typeVal; h.type = v === 'weekly' ? 'weekly' : 'daily'; h.kind = v === 'verzicht' ? 'verzicht' : undefined; }
+    if (h.type === 'weekly' && newT) {
+      const ws = C.weekStart(today());
+      if (!a || !wasWeekly || f.targetFrom === 'all') { h.target = newT; h.targets = []; }
+      else if (C.targetAt(h, ws) !== newT) { h.targets = (h.targets || []).filter(x => x.from < ws); h.targets.push({ from: ws, target: newT }); }
+    } else if (h.type !== 'weekly') { h.target = 1; h.targets = []; }
+    if (h.link === 'weightgoal') h.goal = { kg: f.goalKg, deadline: f.goalDate };
+    if (!a) S.habits.push(h);
+    if (newFive && !a) { h.diff = 5; h.prob = { start5: h.start }; } else setDiff(h, f.diff);
+    for (const n of C.checkGoals(S)) S.notices.push(n);
+    ui.habitDraft = null; save(); toast('Gespeichert');
+    return true;
+  }
 
   // ---------- Aktionen ----------
   function findSet(arg) { const [sid, idx, si, k] = arg.split(':'); const s = S.sessions.find(x => x.id === sid); return { s, it: s && s.items[Number(idx)], si: Number(si), k }; }
@@ -1199,7 +1377,7 @@
     },
     back: () => pop(),
     open: a => { const [n, ...rest] = a.split(':'); const v = rest.join(':');
-      if (n === 'habit' || n === 'session' || n === 'move' || n === 'habitEdit') { ui.draftColor = null; push(n, { id: v || null }); }
+      if (n === 'habit' || n === 'session' || n === 'move' || n === 'habitEdit') { ui.draftColor = null; ui.habitDraft = null; push(n, { id: v || null }); }
       else if (n === 'goalEdit') { const [id, y] = v.split(':'); push('goalEdit', { id: id || null, year: y || null }); }
       else if (n === 'exEdit') { const [id, sid] = v.split(':'); push('exEdit', { id: id || null, sessionId: sid || null }); }
       else if (n === 'exStats') push('exStats', { id: v });
@@ -1222,33 +1400,15 @@
     cal: a => { const [h, m] = a.split(':'); if (m > today()) return; ui.cal[h] = m; render(); },
     year: a => { const [h, y] = a.split(':'); if (y > today().slice(0, 4)) return; ui.cal[h + 'y'] = y; render(); },
     color: a => { ui.draftColor = a; document.querySelectorAll('.swatch').forEach(b => b.setAttribute('aria-pressed', b.dataset.arg === a)); },
-    saveHabit: a => {
-      const name = document.getElementById('hName').value.trim(); if (!name) return toast('Gib der Gewohnheit einen Namen.');
-      const h = a ? S.habits.find(x => x.id === a) : { id: uid('h'), link: null, archived: false };
-      h.name = name; h.emoji = document.getElementById('hEmoji').value.trim() || '✓';
-      h.start = document.getElementById('hStart').value || today(); h.color = ui.draftColor || h.color || COLORS[3];
-      const t = document.getElementById('hType');
-      const tIn = document.getElementById('hTarget');
-      const newT = tIn ? Math.max(1, Math.min(7, Math.round(C.num(tIn.value) || 3))) : null;
-      const wasWeekly = h.type === 'weekly';
-      if (t) { const v = t.value; h.type = v === 'weekly' ? 'weekly' : 'daily'; h.kind = v === 'verzicht' ? 'verzicht' : undefined; }
-      if (h.type === 'weekly' && newT) {
-        const ws = C.weekStart(today()), from = document.getElementById('hTargetFrom');
-        if (!a || !wasWeekly || (from && from.value === 'all')) { h.target = newT; h.targets = []; }
-        else if (C.targetAt(h, ws) !== newT) { h.targets = (h.targets || []).filter(x => x.from < ws); h.targets.push({ from: ws, target: newT }); }
-      } else if (h.type !== 'weekly') { h.target = 1; h.targets = []; }
-      if (h.link === 'weightgoal') {
-        const kg = C.num(document.getElementById('hGoalKg').value), dl = document.getElementById('hGoalDate').value;
-        if (!kg || kg < 30 || kg > 300) return toast('Prüfe das Zielgewicht.');
-        if (!dl) return toast('Gib einen Stichtag an.');
-        h.goal = { kg, deadline: dl };
-      }
-      if (!a) S.habits.push(h);
-      for (const n of C.checkGoals(S)) S.notices.push(n);
-      save(); pop(); toast('Gespeichert');
+    saveHabit: a => { if (commitHabit(readHabitForm(a), false)) pop(); },
+    hardCommit: () => { const f = ui.habitDraft; if (!f) return closeSheet(); ui.sheet = null; if (commitHabit(f, true)) history.go(f.ringOnly ? -1 : -2); else closeSheet(); },
+    archiveHabit: a => {
+      const h = S.habits.find(x => x.id === a); if (!h) return;
+      if (h.archived) { const why = C.activateBlock(S, h, today()); if (why) return toast(why); }
+      else { const st = C.hardStatus(S, h, today()); if (C.hardBound(st) && !confirm(`Archivieren? Neue schwere oder sehr schwere Gewohnheiten bleiben bis ${dNum(C.addMonths(st.p.start5, C.HARD.block))} gesperrt.`)) return; }
+      h.archived = !h.archived; h.archivedOn = h.archived ? today() : undefined; save(); pop();
     },
-    archiveHabit: a => { const h = S.habits.find(x => x.id === a); h.archived = !h.archived; h.archivedOn = h.archived ? today() : undefined; save(); pop(); },
-    deleteHabit: a => { if (!confirm('Gewohnheit samt Historie löschen?')) return; S.habits = S.habits.filter(x => x.id !== a); delete S.checks[a]; save(); pop(ui.stack.filter(x => x.id === a).length); },
+    deleteHabit: a => { const hd = S.habits.find(x => x.id === a); if (hd && C.hardBound(C.hardStatus(S, hd, today()))) return toast('Während der Bindung nicht löschbar.'); if (!confirm('Gewohnheit samt Historie löschen?')) return; S.habits = S.habits.filter(x => x.id !== a); delete S.checks[a]; save(); pop(ui.stack.filter(x => x.id === a).length); },
     startTraining: a => { const [mode, date] = a.split(':'); newSession(mode, date || today()); },
     newMove: a => { const m = { id: uid('m'), kind: 'move', date: a || today(), activity: 'Spaziergang', min: 60, note: '', done: true }; S.sessions.push(m); save(); push('move', { id: m.id }); },
     finish: a => { const s = S.sessions.find(x => x.id === a); s.done = true; s.endedAt = C.nowLocal(); save(); pop(); toast(`Einheit ${s.num} gespeichert`); },
@@ -1365,6 +1525,7 @@
 
   // Eingaben ohne Neuaufbau (Fokus bleibt)
   const INPUTS = {
+    hardHint: () => updateHardHint(),
     set: (el, a) => {
       const { s, it, si, k } = findSet(a); if (!it) return;
       const ex = C.exById(S, it.ex);
@@ -1402,7 +1563,15 @@
     goalType: el => { document.querySelectorAll('[data-gtype]').forEach(x => { x.hidden = x.dataset.gtype !== el.value; }); },
     flag: (el, a) => { if (!(a in FLAGS)) return; S.settings[a] = el.checked; save(); render(); },
     ringToggle: (el, a) => { const ex = setting('ringExclude', []).filter(x => x !== a); if (!el.checked) ex.push(a); S.settings.ringExclude = ex; save(); render(); },
-    habitDiff: (el, a) => { const h = S.habits.find(x => x.id === a); if (!h) return; h.diff = Math.max(1, Math.min(5, Number(el.value) || 3)); save(); render(); },
+    habitDiff: (el, a) => {
+      const h = S.habits.find(x => x.id === a); if (!h) return;
+      const d = Math.max(1, Math.min(5, Number(el.value) || 3));
+      if (!C.diffGate(S, h, today()).ok.has(d)) { toast('Diese Stufe ist gerade gesperrt.'); return render(); }
+      if (d === 4 && C.diffOf(h) === 5 && C.hardBound(C.hardStatus(S, h, today())) && !confirm('Auf „schwer“ herabstufen? Danach folgen 2 Monate Bewährung mit mindestens 98 %.')) { el.value = '5'; return; }
+      if (d === 5 && C.diffOf(h) !== 5) { el.value = String(C.diffOf(h)); ui.habitDraft = { ringOnly: true, id: h.id, diff: 5 }; return openSheet({ name: 'hardConfirm' }); }
+      setDiff(h, d); save(); render();
+    },
+    hardHint: () => updateHardHint(),
     equip: (el, a) => { const on = equipOn().filter(k => k !== a); if (el.checked) on.push(a); S.settings.equipOn = Object.keys(C.EQUIP).filter(k => on.includes(k)); save(); render(); },
     exTypeShow: el => { const w = document.getElementById('eUnitWrap'); if (w) w.hidden = !['time', 'wtime'].includes(el.value); },
     tabShow: (el, a) => {

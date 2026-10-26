@@ -469,3 +469,20 @@ h2.exh{margin:20px 0 2px;font-size:var(--f-m)}
 .ring-ctl select{min-height:40px;padding:6px 10px;flex:1;min-width:0;font-size:15px}
 .ring-ctl .share{min-width:46px;text-align:right}
 .srow.off select{opacity:.45}
+
+/* 2.7.0: feste Regeln für schwere Gewohnheiten */
+.hero-streak{font-size:var(--f-s);margin-top:4px;opacity:.9}
+.hero-streak b{font-weight:700}
+.tile-streak .buf{color:var(--mu)}
+.tile-streak .buf.low{color:var(--warn)}
+.card.hard .stats{margin:0}
+.card.hard .stat b{font-size:20px}
+.card.plan p{margin:6px 0 0;font-size:var(--f-m)}
+.hard-hint{background:var(--s2);border-radius:var(--rs);padding:12px 14px;margin:-4px 0 14px;font-size:var(--f-s);line-height:1.45;color:var(--mu)}
+.hard-hint b{color:var(--tx)}
+.hard-hint b.t{display:block;font-size:var(--f-m);margin:0 0 6px}
+.hard-hint ul{margin:0;padding-left:18px}
+.hard-hint li{margin:3px 0}
+.hard-hint .lbl{margin:12px 0 4px}
+label.f>span.row{display:flex;align-items:center;justify-content:flex-start;gap:4px}
+label.f>span.row .info{margin:-10px 0;width:32px;height:32px}

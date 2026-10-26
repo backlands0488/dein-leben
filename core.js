@@ -51,6 +51,7 @@
     s.goals = s.goals || []; s.goalLog = s.goalLog || [];
     migrateKfa(s);
     migrateCatalog(s);
+    migrateHard(s);
     return s;
   }
   // Alte KFA-Werte (selbst nach Navy gemessen) ab 06.05.2026 als Messungen übernehmen, nur echte Änderungen
@@ -532,6 +533,128 @@ mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
   const diffOf = h => Number.isInteger(h.diff) && h.diff >= 1 && h.diff <= 5 ? h.diff : 3;
   function shares(habits) { const t = habits.reduce((a, h) => a + diffOf(h), 0); return new Map(habits.map(h => [h.id, t ? diffOf(h) / t : 0])); }
 
+  // ---------- Feste Regeln für schwere Gewohnheiten ----------
+  // Stufe 5 „sehr schwer“: höchstens eine aktive. Sie bleibt mindestens 4 Monate auf 5; auf 4 herabstufen darf man,
+  // sobald die letzten 4 Monate zu mindestens 98 % erfüllt sind (rollierend). Danach 2 Monate auf 4; sind die letzten
+  // 2 Monate zu mindestens 98 % erfüllt, ist die Bewährung bestanden. Bis dahin keine weitere Stufe 4 oder 5.
+  // Wird die Gewohnheit vorher archiviert, gilt die Sperre bis 6 Monate nach ihrem Beginn. Höchstens 5 aktive Gewohnheiten.
+  // h.prob = { start5, ok5?, start4?, done? } (Tage als JJJJ-MM-TT)
+  const HARD = { m5: 4, m4: 2, quota: 98, maxActive: 5, block: 6 };
+  function addMonths(s, n) {
+    const [y, m, d] = s.slice(0, 10).split('-').map(Number);
+    const t = new Date(y, m - 1 + n, 1, 12), last = new Date(t.getFullYear(), t.getMonth() + 1, 0, 12).getDate();
+    t.setDate(Math.min(d, last)); return iso(t);
+  }
+  // Beginn des Fensters von m Monaten, das am Tag e endet
+  const winStart = (e, m) => addMonths(addDays(e, 1), -m);
+  // Erfüllung im Fenster [a, b]. Offenes (heute, laufende Woche, Zukunft) zählt bei assume als erledigt, sonst gar nicht.
+  // Täglich: Tage. X-mal pro Woche: Einheiten bis zum Wochenziel, nur ganze Wochen im Fenster.
+  function winQuota(state, h, a, b, today, assume, days = checkedDays(state, h)) {
+    let n = 0, t = 0;
+    if (h.type === 'weekly') {
+      for (let w = weekStart(a); w <= b; w = addDays(w, 7)) {
+        if (w < a || addDays(w, 6) > b) continue;
+        const T = targetAt(h, w), c = Math.min(T, weekCount(days, w));
+        if (addDays(w, 6) < today || c >= T) { t += T; n += c; } else if (assume) { t += T; n += T; }
+      }
+    } else {
+      for (const d of dayRange(a, b)) {
+        if (d < today || days.has(d)) { t++; if (days.has(d)) n++; } else if (assume) { t++; n++; }
+      }
+    }
+    return { n, t };
+  }
+  const needFor = t => Math.ceil(t * HARD.quota / 100);
+  // Letzter abgeschlossener Tag bzw. letzte abgeschlossene Woche (heute zählt, sobald erledigt)
+  function doneEnd(h, today, days) {
+    if (h.type === 'weekly') { const w = weekStart(today); return weekCount(days, w) >= targetAt(h, w) ? addDays(w, 6) : addDays(w, -1); }
+    return days.has(today) ? today : addDays(today, -1);
+  }
+  function passes(state, h, s, m, today, days = checkedDays(state, h)) {
+    const b = doneEnd(h, today, days), a = winStart(b, m);
+    if (a < s) return false;
+    const q = winQuota(state, h, a, b, today, false, days);
+    return q.t > 0 && q.n >= needFor(q.t);
+  }
+  // Frühestes Fensterende: volle m Monate ab s und nicht vor dem laufenden Tag bzw. der laufenden Woche
+  function firstEnd(h, s, m, today) {
+    let e = addDays(addMonths(s, m), -1);
+    if (h.type === 'weekly') { e = addDays(weekStart(e), 6); const now = addDays(weekStart(today), 6); return e > now ? e : now; }
+    return e > today ? e : today;
+  }
+  // Puffer: wie viele Fehltage (bzw. Einheiten) noch erlaubt sind, und ab wann es frühestens reicht, wenn ab jetzt alles klappt
+  function bufferInfo(state, h, s, m, today) {
+    const days = checkedDays(state, h), wk = h.type === 'weekly', step = wk ? 7 : 1;
+    let e = firstEnd(h, s, m, today);
+    const q = winQuota(state, h, winStart(e, m), e, today, true, days), need = needFor(q.t);
+    const out = { rest: q.n - need, t: q.t, miss: q.t - need, unit: wk ? 'Einheiten' : 'Tage', at: null };
+    for (let i = 0; i < 800 / step; i++, e = addDays(e, step)) {
+      const r = winQuota(state, h, winStart(e, m), e, today, true, days);
+      if (r.t > 0 && r.n >= needFor(r.t)) { out.at = wk ? addDays(weekStart(e), Math.max(0, targetAt(h, weekStart(e)) - 1)) : e; break; }
+    }
+    if (out.at && wk && out.at < today) out.at = today;
+    return out;
+  }
+  // Stand einer Gewohnheit in den festen Regeln; null = keine Bindung
+  function hardStatus(state, h, today = todayStr()) {
+    const p = h.prob; if (!p || !p.start5) return null;
+    if (p.done) return { phase: 'done', p };
+    const until = addMonths(p.start5, HARD.block);
+    if (h.archived) return { phase: 'arch', p, until, blocks: today < until };
+    const pend = today < p.start5; // Bedenkzeit: Beginn liegt noch vor uns
+    if (diffOf(h) === 5) return { phase: 5, p, pend, blocks: true, ok: !!p.ok5, from: addMonths(p.start5, HARD.m5), until, buf: pend ? null : bufferInfo(state, h, p.start5, HARD.m5, today) };
+    if (p.start4) return { phase: 4, p, blocks: true, from: addMonths(p.start4, HARD.m4), buf: bufferInfo(state, h, p.start4, HARD.m4, today) };
+    return null;
+  }
+  // Gebunden = Art und Wochenziel dürfen nicht leichter werden, Löschen nicht möglich
+  const hardBound = st => !!st && ((st.phase === 5 && !st.pend) || st.phase === 4 || (st.phase === 'arch' && st.blocks));
+  // Erlaubte Stufen für eine Gewohnheit (h = null: neue Gewohnheit)
+  function diffGate(state, h, today = todayStr()) {
+    const st = h ? hardStatus(state, h, today) : null, ok = new Set([1, 2, 3]);
+    if (st && st.phase === 5 && !st.pend) return { ok: new Set(st.ok ? [4, 5] : [5]), st };
+    if (st && st.phase === 4) return { ok: new Set([4]), st };
+    const others = state.habits.filter(x => !h || x.id !== h.id);
+    const blocker = others.find(x => { const s = hardStatus(state, x, today); return s && s.blocks; }) || null;
+    const five = others.find(x => !x.archived && diffOf(x) === 5) || null;
+    if (!blocker) ok.add(4);
+    if (!blocker && !five) ok.add(5);
+    if (h) ok.add(diffOf(h));
+    return { ok, st, blocker, five };
+  }
+  const activeCount = (state, exceptId) => state.habits.filter(x => !x.archived && x.id !== exceptId).length;
+  // Wieder aktivieren: Grenze von 5 und die Regeln für die eigene Stufe
+  function activateBlock(state, h, today = todayStr()) {
+    if (activeCount(state, h.id) >= HARD.maxActive) return `Schon ${HARD.maxActive} aktive Gewohnheiten.`;
+    const d = diffOf(h), g = diffGate(state, h, today);
+    if (d === 5 && g.five) return `„${g.five.name}“ ist schon sehr schwer.`;
+    if (d >= 4 && g.blocker) return `Erst muss „${g.blocker.name}“ die Bewährung bestehen.`;
+    return null;
+  }
+  // Fortschritt festhalten; liefert Hinweise für „Heute“
+  function tickHard(state, today = todayStr()) {
+    const out = [];
+    for (const h of state.habits) {
+      const p = h.prob; if (!p || !p.start5 || p.done || h.archived || today < p.start5) continue;
+      const days = checkedDays(state, h);
+      if (diffOf(h) === 5 && !p.ok5 && passes(state, h, p.start5, HARD.m5, today, days)) { p.ok5 = today; out.push(`„${h.name}“: 4 Monate mit mindestens 98 % geschafft. Du darfst sie jetzt auf „schwer“ herabstufen.`); }
+      else if (diffOf(h) === 4 && p.start4 && passes(state, h, p.start4, HARD.m4, today, days)) { p.done = today; out.push(`„${h.name}“: Bewährung bestanden. Eine weitere schwere oder sehr schwere Gewohnheit ist jetzt möglich.`); }
+    }
+    return out;
+  }
+  // Verstöße im Bestand (z. B. aus der Zeit vor den Regeln); die App archiviert nichts von selbst
+  function hardViolations(state) {
+    const act = state.habits.filter(h => !h.archived), out = [];
+    if (act.length > HARD.maxActive) out.push(`${act.length} aktive Gewohnheiten, erlaubt sind ${HARD.maxActive}. Bitte archiviere ${act.length - HARD.maxActive}.`);
+    const fives = act.filter(h => diffOf(h) === 5);
+    if (fives.length > 1) out.push(`${fives.length} sehr schwere Gewohnheiten, erlaubt ist eine. Bitte stufe ${fives.length - 1} herab.`);
+    return out;
+  }
+  // Bestand: genau eine aktive Stufe 5 ohne Bindung bekommt sie ab heute; bei mehreren erst, wenn nur noch eine übrig ist
+  function migrateHard(s, today = todayStr()) {
+    const fives = s.habits.filter(h => !h.archived && diffOf(h) === 5);
+    if (fives.length === 1 && !(fives[0].prob && fives[0].prob.start5 && !fives[0].prob.done)) fives[0].prob = { start5: today, migrated: true };
+  }
+
   // ---------- Training ----------
   const TYPES = {
     weight: 'Gewicht × Wdh.', assist: 'Gegengewicht × Wdh.', reps: 'Nur Wiederholungen',
@@ -627,7 +750,8 @@ mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
     checkedDays, habitStats, targetAt, tempo, forecast, lockState, goalProgress, daysInYear, checkGoals, weekCount, TYPES, CATS, exById, nextNum, trainings, lastItem, pauseFor, setSummary,
     METRICS, metricValues, exHistory, repRecords,
     MUSCLES, RADAR, EQUIP, EQUIP_OFF, CATALOG, catByKey, low, adopt, adoptedRef, migrateCatalog, matches, parseTime, timeInput, timeTxt,
-    trainStats, radarOf, records, weekStreak, sessMin, counted, diffOf, shares
+    trainStats, radarOf, records, weekStreak, sessMin, counted, diffOf, shares,
+    HARD, addMonths, winQuota, passes, bufferInfo, hardStatus, hardBound, diffGate, activeCount, activateBlock, tickHard, hardViolations, migrateHard
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
 })(typeof self !== 'undefined' ? self : this);
