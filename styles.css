@@ -486,3 +486,12 @@ h2.exh{margin:20px 0 2px;font-size:var(--f-m)}
 .hard-hint .lbl{margin:12px 0 4px}
 label.f>span.row{display:flex;align-items:center;justify-content:flex-start;gap:4px}
 label.f>span.row .info{margin:-10px 0;width:32px;height:32px}
+
+/* 2.8.0: Urlaub und Progression */
+.wbar i.vac{opacity:.28}
+.vto{width:auto;max-width:150px;min-height:40px;font-size:14px;flex:none}
+.prog{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:10px 0 4px;padding:8px 10px;border-radius:12px;background:color-mix(in srgb,var(--accent) 16%,var(--s2))}
+.prog.warn{background:color-mix(in srgb,var(--warn) 18%,var(--s2))}
+.prog .grow{min-width:0;flex:1 1 100%}
+.prog .grow+.btn{margin-left:auto}
+.prog .btn.sm{min-height:36px}

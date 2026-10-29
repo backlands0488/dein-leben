@@ -135,6 +135,7 @@
     applyTheme();
     if (!S) { $app.innerHTML = viewWelcome(); return; }
     const hn = C.tickHard(S, today()); if (hn.length) { S.notices.push(...hn); save(); }
+    if (C.settleProg(S)) save();
     const t = top();
     saveScroll();
     let html;
@@ -210,16 +211,17 @@
     const stats = active.map(h => C.habitStats(S, h, d));
     const ri = active.map((h, i) => i).filter(i => inRing(active[i])), rh = ri.map(i => active[i]), rs = ri.map(i => stats[i]);
     const done = rs.filter(st => st.days.has(d)).length;
-    let out = `<div class="ph"><h1>${DAYS[pd.getDay()]}</h1><span class="meta num">${pd.getDate()}. ${MONTHS[pd.getMonth()]}</span></div>`;
+    const vac = C.vacOn(S, d);
+    let out = `<div class="ph"><h1>${DAYS[pd.getDay()]}</h1><span class="meta num">${pd.getDate()}. ${MONTHS[pd.getMonth()]}${vac ? ` · 🏖 bis ${dNum(vac.to).slice(0, 6)}` : ''}</span></div>`;
     for (const [i, n] of (S.notices || []).entries()) out += `<div class="notice good row"><span class="grow">${esc(n)}</span><button class="btn sm ghost" data-act="dismiss" data-arg="${i}">OK</button></div>`;
     const running = S.sessions.find(s => s.kind === 'training' && !s.done);
     for (const v of C.hardViolations(S)) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="habits"><span class="grow">${esc(v)}</span><b>›</b></button>`;
     if (running) out += `<button class="notice due row" style="width:100%;border:0;text-align:left" data-act="open" data-arg="session:${running.id}"><span class="grow">Einheit #${String(running.num).padStart(3, '0')} läuft</span><b>›</b></button>`;
     if (rh.length) {
-      const wk = weekProgress(rh, rs, d), rsN = ringStreak(d);
-      const inner = wk.full ? CHECK : `<b class="num" style="font-size:18px">${Math.round(wk.frac * 100)}%</b>`;
-      out += `<div class="hero-b">${ring(wk.frac, 76, 9, 'var(--accent)', inner, wk.n ? wk.soll : null)}
-        <div><div class="hero-sub">Diese Woche</div><div class="hero-num num">Soll ${Math.round(wk.soll * 100)} %</div><div class="hero-sub num">heute ${done} von ${rh.length}</div>
+      const wk = weekProgress(rh, rs, d), rsN = ringStreak(d), offT = rs.filter(st => st.off.has(d) && !st.days.has(d)).length;
+      const inner = wk.vac ? '<span style="font-size:26px" aria-hidden="true">🏖</span>' : wk.full ? CHECK : `<b class="num" style="font-size:18px">${Math.round(wk.frac * 100)}%</b>`;
+      out += `<div class="hero-b">${ring(wk.vac ? 0 : wk.frac, 76, 9, 'var(--accent)', inner, wk.n ? wk.soll : null)}
+        <div><div class="hero-sub">Diese Woche</div><div class="hero-num num">${wk.vac ? 'Urlaub' : `Soll ${Math.round(wk.soll * 100)} %`}</div>${rh.length - offT ? `<div class="hero-sub num">heute ${done} von ${rh.length - offT}</div>` : ''}
         <div class="hero-streak num" aria-label="Wochen in Folge mit vollem Wochenring">🔥 <b>${rsN}</b> ${rsN === 1 ? 'Woche' : 'Wochen'}</div></div></div>`;
     }
     if (ws.due) out += `<div class="entry-b"><input type="text" inputmode="decimal" placeholder="Gewicht heute, kg" id="quickKg" aria-label="Gewicht in kg"><button class="fab" data-act="quickWeight" aria-label="Gewicht speichern">${CHECK}</button></div>`;
@@ -233,41 +235,46 @@
   // Wochenring, gewichtet nach Schwierigkeit (1–5, zusammen 100 %).
   // Je Gewohnheit: Möglichkeiten P (täglich: Tage ab Beginn; X-mal pro Woche: das Wochenziel, Mehrleistung zählt nicht doppelt),
   // erledigt D, Soll bis heute E. Ring = Σ Anteil × D/P, Strich = Σ Anteil × E/P.
+  // Urlaub: Für pausierte Gewohnheiten zählen Urlaubstage im Ring gar nicht (auch nicht abgehakt); „X-mal pro Woche“
+  // fällt nur in einer ganzen Urlaubswoche heraus. vac = in dieser Woche läuft wegen Urlaub nichts.
   function weekProgress(active, stats, d) {
     const ws = C.weekStart(d), we = C.addDays(ws, 6), elapsed = C.diffDays(ws, d) + 1;
-    const rows = [];
+    const rows = []; let vac = 0;
     active.forEach((h, i) => {
-      const days = stats[i].days;
+      const days = stats[i].days, off = stats[i].off || C.offDays(S, h);
       if (h.start > we) return;
       let P = 0, D = 0, E = 0;
       if (h.type === 'weekly') {
-        const t = C.targetAt(h, ws);
-        P = t; D = Math.min(t, C.weekCount(days, ws)); E = t * elapsed / 7;
+        const t = C.targetAt(h, ws), c = C.weekCount(days, ws);
+        if (C.weekOff(off, ws)) { vac++; return; }
+        P = t; D = Math.min(t, c); E = t * elapsed / 7;
       } else {
         const from = h.start > ws ? h.start : ws;
-        P = C.diffDays(from, we) + 1;
-        if (from <= d) { for (const day of C.dayRange(from, d)) if (days.has(day)) D++; E = C.diffDays(from, d) + 1; }
+        for (const day of C.dayRange(from, we)) if (!off.has(day)) P++;
+        if (from <= d) for (const day of C.dayRange(from, d)) if (!off.has(day)) { E++; if (days.has(day)) D++; }
+        if (!P) vac++;
       }
       if (P > 0) rows.push({ h, P, D, E });
     });
     const sh = C.shares(rows.map(r => r.h));
     let frac = 0, soll = 0;
     for (const r of rows) { frac += sh.get(r.h.id) * r.D / r.P; soll += sh.get(r.h.id) * Math.min(1, r.E / r.P); }
-    return { n: rows.length, frac, soll, full: rows.length > 0 && rows.every(r => r.D >= r.P) };
+    return { n: rows.length, frac, soll, full: rows.length > 0 && rows.every(r => r.D >= r.P), vac: !rows.length && vac > 0 };
   }
   // Serie des Gesamtwochenziels: Wochen in Folge mit vollem Wochenring (jede Gewohnheit im Ring hat ihr Wochensoll erfüllt).
   // Vergangene Wochen mit den Gewohnheiten, die damals liefen; die laufende Woche zählt erst, wenn sie voll ist.
+  // Reine Urlaubswochen (nichts läuft) unterbrechen die Serie nicht und zählen nicht mit.
   function ringStreak(d) {
     const all = S.habits.filter(inRing), days = new Map(all.map(h => [h.id, C.checkedDays(S, h)]));
     const full = ws => {
       const we = C.addDays(ws, 6), end = we < d ? we : d;
       const hs = all.filter(h => h.start <= we && (!h.archived || (h.archivedOn && h.archivedOn >= we)));
-      const wp = weekProgress(hs, hs.map(h => ({ days: days.get(h.id) })), end);
-      return wp.n > 0 && wp.full;
+      const wp = weekProgress(hs, hs.map(h => ({ days: days.get(h.id), off: C.offDays(S, h) })), end);
+      return wp.n > 0 ? wp.full : wp.vac ? 'skip' : false;
     };
     let w = C.weekStart(d), n = 0;
-    if (!full(w)) w = C.addDays(w, -7);
-    while (n < 1000 && full(w)) { n++; w = C.addDays(w, -7); }
+    if (full(w) !== true) w = C.addDays(w, -7);
+    for (let i = 0; i < 1000; i++, w = C.addDays(w, -7)) { const r = full(w); if (r === true) n++; else if (r !== 'skip') break; }
     return n;
   }
   // Tagespunkte der Woche: Form, Beschriftung und Häkchen nach Einstellung
@@ -275,7 +282,7 @@
     const ws = C.weekStart(d), shape = setting('dotShape', 'bar'), lab = setting('dotLabel', 'none'), chk = shape !== 'bar' && flag('dotCheck');
     return `<span class="wbar ${shape}">${WD.map((w, i) => {
       const day = C.addDays(ws, i), on = st.days.has(day), txt = lab === 'wd' ? w : lab === 'date' ? Number(day.slice(8)) : '';
-      const cls = `${on ? 'on' : ''} ${day === d ? 'today' : ''} ${day > d || day < h.start ? 'off' : ''}`;
+      const cls = `${on ? 'on' : ''} ${day === d ? 'today' : ''} ${day > d || day < h.start ? 'off' : ''} ${!on && st.off && st.off.has(day) ? 'vac' : ''}`;
       if (shape === 'bar') return txt ? `<span class="c"><i class="${cls}"></i><em class="${day === d ? 'now' : ''}">${txt}</em></span>` : `<i class="${cls}" title="${w}"></i>`;
       return `<i class="${cls}" title="${w}">${on && chk ? CHECK_SM : txt}</i>`;
     }).join('')}</span>`;
@@ -288,7 +295,7 @@
     let rects = '';
     for (let w = 0; w < YEAR_WEEKS; w++) for (let i = 0; i < 7; i++) {
       const day = C.addDays(first, w * 7 + i); if (day > d) continue;
-      const x = w * (cell + gap), y = i * (cell + gap), on = st.days.has(day), pre = day < h.start;
+      const x = w * (cell + gap), y = i * (cell + gap), on = st.days.has(day), pre = day < h.start || (!on && st.off && st.off.has(day));
       rects += `<rect x="${x}" y="${y}" width="${cell}" height="${cell}" rx="${r}" style="fill:${on ? 'var(--hc)' : 'var(--s3)'}${pre ? ';opacity:.35' : ''}"${day === d ? ' class="now"' : ''}/>`;
     }
     return `<svg class="ygrid" viewBox="-1.5 -1.5 ${YEAR_WEEKS * (cell + gap) - gap + 3} ${7 * (cell + gap) - gap + 3}" role="img" aria-label="${esc(h.name)}: letzte ${YEAR_WEEKS} Wochen">${rects}</svg>`;
@@ -302,7 +309,8 @@
   function streakTxt(h, st) {
     const weekly = h.type === 'weekly';
     const hs = C.hardStatus(S, h, today()), buf = hs && hs.buf;
-    return `<b>${st.cur}</b> ${weekly ? (st.cur === 1 ? 'Woche' : 'Wochen') : (st.cur === 1 ? 'Tag' : 'Tage')}${weekly ? ` · ${st.week.n}/${st.week.t}` : ''}${buf ? ` · <span class="buf ${buf.rest > 0 ? '' : 'low'}" title="Puffer bis 98 %">Puffer ${Math.max(0, buf.rest)}</span>` : ''}`;
+    const pausedToday = st.off && st.off.has(today()) && !st.days.has(today());
+    return `<b>${st.cur}</b> ${weekly ? (st.cur === 1 ? 'Woche' : 'Wochen') : (st.cur === 1 ? 'Tag' : 'Tage')}${weekly ? ` · ${st.week.n}/${st.week.t}` : ''}${pausedToday ? ' · 🏖' : ''}${buf ? ` · <span class="buf ${buf.rest > 0 ? '' : 'low'}" title="Puffer bis 98 %">Puffer ${Math.max(0, buf.rest)}</span>` : ''}`;
   }
   const tickBtn = (h, on, d) => `<button class="tick ${on ? 'on' : ''}" data-act="${h.link === 'sport' ? 'sportSheet' : 'toggle'}" data-arg="${h.id}:${d}" aria-label="${esc(h.name)} heute abhaken" aria-pressed="${on}">${CHECK}</button>`;
   function habitTile(h, st, d) {
@@ -458,8 +466,8 @@
   function screenHabitEdit({ id }) {
     const h = id ? S.habits.find(x => x.id === id) : null;
     const dr = ui.habitDraft && !ui.habitDraft.ringOnly && (ui.habitDraft.id || null) === (id || null) ? ui.habitDraft : null;
-    const base = h || { name: '', emoji: '✓', color: COLORS[3], type: 'daily', target: 3, start: today(), diff: 3, plan: '' };
-    const v = dr ? { ...base, name: dr.name, emoji: dr.emoji, start: dr.start, plan: dr.plan, diff: dr.diff, type: dr.typeVal === 'weekly' ? 'weekly' : dr.typeVal ? 'daily' : base.type, kind: dr.typeVal ? (dr.typeVal === 'verzicht' ? 'verzicht' : undefined) : base.kind } : base;
+    const base = h || { name: '', emoji: '✓', color: COLORS[3], type: 'daily', target: 3, start: today(), diff: 3, plan: '', vac: false };
+    const v = dr ? { ...base, name: dr.name, emoji: dr.emoji, start: dr.start, plan: dr.plan, diff: dr.diff, vac: dr.vac === null ? base.vac : dr.vac, type: dr.typeVal === 'weekly' ? 'weekly' : dr.typeVal ? 'daily' : base.type, kind: dr.typeVal ? (dr.typeVal === 'verzicht' ? 'verzicht' : undefined) : base.kind } : base;
     ui.draftColor = ui.draftColor || v.color;
     const st = h ? C.hardStatus(S, h, today()) : null, bound = C.hardBound(st), full = !h && C.activeCount(S) >= C.HARD.maxActive;
     const diff = dr ? dr.diff : C.diffOf(v), note = gateNote(h);
@@ -471,6 +479,7 @@
       <label class="f"><span class="row between">Schwierigkeit ${infoBtn('hard')}</span><select id="hDiff" data-change="hardHint">${diffOpts(h, diff)}</select></label>
       ${note ? `<p class="faint small" style="margin:-6px 0 12px">${note}</p>` : ''}
       <div id="hHint" data-id="${h ? h.id : ''}">${hardHint(h, { diff, type: ftype, target: h ? C.targetAt(h, C.weekStart(today())) : 3, start: v.start })}</div>
+      <div class="row between" style="margin:0 0 14px"><label class="check"><input type="checkbox" id="hVac" ${v.vac !== false ? 'checked' : ''} ${bound && h && h.vac !== false ? 'disabled' : ''}> Auch im Urlaub</label>${infoBtn('vac')}</div>
       <div class="fields"><label class="f"><span>Symbol (Emoji)</span><input type="text" id="hEmoji" value="${esc(v.emoji)}"></label>
       <label class="f"><span>Beginn</span><input type="date" id="hStart" data-change="hardHint" value="${v.start}" ${!h && diff === 5 ? `min="${tomorrow()}"` : ''}></label></div>
       ${h && h.link === 'sport' ? `<p class="faint small">Wird automatisch durch deine Trainings abgehakt. Die Art bleibt deshalb „X-mal pro Woche“.</p>${targetFields(h)}` : ''}
@@ -554,9 +563,71 @@
     }
     return `<div class="ex ${paused ? 'paused' : ''}"><div class="row between"><h3>${esc(ex.name)}${ex.uni ? ' <span class="faint small">pro Seite</span>' : ''}</h3>
       <span>${paused ? '<span class="badge pause">pausiert</span> ' : ''}<span class="badge"><i class="cdot" style="--c:${catCol(ex.cat)}"></i>${esc(ex.cat)}</span></span></div>
-      <p class="last">${lastTxt}</p>${body}
+      <p class="last">${lastTxt}</p>${progBanner(s, it, idx, ex)}${body}
       <input type="text" style="margin-top:10px;min-height:40px;font-size:14px" placeholder="Notiz zur Übung" value="${esc(it.note || '')}" data-input="itemNote" data-arg="${s.id}:${idx}">
-      <div class="row" style="justify-content:flex-end;margin-top:8px">${last ? `<button class="btn sm ghost" style="margin-right:auto" data-act="open" data-arg="exStats:${it.ex}">Verlauf</button>` : ''}<button class="btn sm ghost" data-act="moveItem" data-arg="${s.id}:${idx}:-1" aria-label="Nach oben">↑</button><button class="btn sm ghost" data-act="moveItem" data-arg="${s.id}:${idx}:1" aria-label="Nach unten">↓</button><button class="btn sm danger" data-act="delItem" data-arg="${s.id}:${idx}" aria-label="Übung entfernen">✕</button></div></div>`;
+      <div class="row" style="justify-content:flex-end;margin-top:8px">${last ? `<button class="btn sm ghost" data-act="open" data-arg="exStats:${it.ex}">Verlauf</button>` : ''}${C.progable(ex) ? `<button class="btn sm ${it.pain ? 'danger' : 'ghost'}" data-act="pain" data-arg="${s.id}:${idx}" aria-pressed="${!!it.pain}">Beschwerden</button>` : ''}<span class="grow"></span><button class="btn sm ghost" data-act="moveItem" data-arg="${s.id}:${idx}:-1" aria-label="Nach oben">↑</button><button class="btn sm ghost" data-act="moveItem" data-arg="${s.id}:${idx}:1" aria-label="Nach unten">↓</button><button class="btn sm danger" data-act="delItem" data-arg="${s.id}:${idx}" aria-label="Übung entfernen">✕</button></div></div>`;
+  }
+  // ---------- Progression ----------
+  const fmtPerf = (ex, v) => { const k = C.perfKey(ex); return k === 's' ? C.timeTxt(v, ex.unit) : `${C.fmtW(v)} ${C.PERF_UNIT[k]}`; };
+  const fmtLoad = (ex, v) => ex.type === 'assist' ? (v === 0 ? 'ohne Hilfe' : `${C.fmtW(v)} kg Hilfe`) : `${C.fmtW(v)} kg`;
+  function progBanner(s, it, idx, ex) {
+    if (s.done || it.progNo || it.progOk) return '';
+    const p = C.progFor(S, it.ex, s, it); if (!p) return '';
+    const btns = `<button class="btn sm primary" data-act="progOk" data-arg="${s.id}:${idx}">Übernehmen</button><button class="btn sm ghost" data-act="progNo" data-arg="${s.id}:${idx}">Noch nicht</button>`;
+    const was = v => `<span class="faint num"> statt ${C.fmtW(v)}</span>`;
+    if (p.k === 'up') return `<div class="prog"><span class="grow">↑ <b class="num">${fmtLoad(ex, p.w)}</b>${was(p.from)}</span>${btns}</div>`;
+    if (p.k === 'down') return `<div class="prog warn"><span class="grow">↓ <b class="num">${fmtLoad(ex, p.w)}</b>${was(p.from)}</span>${btns}</div>`;
+    if (p.k === 'goal') return `<div class="prog"><span class="grow">Ziel ↑ <b class="num">${fmtPerf(ex, p.hi)}</b><span class="faint num"> statt ${fmtPerf(ex, p.from)}</span></span>${btns}</div>`;
+    if (p.k === 'back') return p.w !== undefined
+      ? `<div class="prog warn"><span class="grow">Wiedereinstieg <b class="num">${fmtLoad(ex, p.w)}</b>${was(p.from)}</span>${btns}</div>`
+      : `<div class="prog warn"><span class="grow">Wiedereinstieg · Ziel ca. <b class="num">${fmtPerf(ex, p.hi)}</b></span><button class="btn sm ghost" data-act="progNo" data-arg="${s.id}:${idx}">OK</button></div>`;
+    if (p.k === 'pain') return `<p class="faint small num" style="margin:6px 0 0">Beschwerden · keine Steigerung bis ${dNum(p.until).slice(0, 6)}</p>`;
+    return '';
+  }
+  // Kurzstand für Übung und Verlauf
+  function progStatus(ex) {
+    const p = C.progFor(S, ex.id, { id: null, date: today() }); if (!p) return '';
+    const at = v => dNum(v).slice(0, 6);
+    if (p.k === 'up' || p.k === 'down') return `${p.k === 'up' ? '↑' : '↓'} ${fmtLoad(ex, p.w)} in der nächsten Einheit`;
+    if (p.k === 'goal') return `Ziel ↑ ${fmtPerf(ex, p.hi)} in der nächsten Einheit`;
+    if (p.k === 'back') return p.w !== undefined ? `Wiedereinstieg mit ${fmtLoad(ex, p.w)}` : `Wiedereinstieg, Ziel ca. ${fmtPerf(ex, p.hi)}`;
+    if (p.k === 'pain') return `Beschwerden · gesperrt bis ${at(p.until)}`;
+    if (p.k === 'pause') return 'Kategorie pausiert';
+    if (p.k === 'once') return `Nächste Steigerung frühestens ${at(p.until)}`;
+    if (p.need === undefined) return `${p.have}/${p.n} Einheiten`;
+    return `${p.have}/${p.n} Einheiten mit ${fmtPerf(ex, p.need)}${p.W !== undefined && p.W !== null ? ` · ${fmtLoad(ex, p.W)}` : ''}`;
+  }
+  function progFields(e) {
+    const c = C.progCfg(S, e), pk = C.perfKey(e), loaded = !!C.LOADED[e.type], unit = C.PERF_UNIT[pk];
+    const tv = v => pk === 's' ? C.timeInput(v, e.unit) : C.fmtW(v), su = loaded ? 'kg' : pk === 's' && e.unit === 'min' ? 'Min.' : unit, vu = pk === 's' && e.unit === 'min' ? 'Min.' : unit;
+    const inp = (id, l, v, mode = 'decimal') => `<label class="f"><span>${l}</span><input type="text" inputmode="${mode}" id="${id}" value="${esc(v)}"></label>`;
+    const src = c.src === 'abg' ? 'aus deinen Einheiten abgeleitet' : c.src === 'std' ? 'Standard, wird aus deinen Einheiten abgeleitet' : '';
+    const stat = e.id && C.exHistory(S, e.id).length ? progStatus(e) : '';
+    return `<div class="lbl mon row between" style="align-items:center"><span>Progression</span>${infoBtn('prog')}</div>
+      <div class="card"><label class="row between" style="cursor:pointer;margin:0 0 12px"><b>Steigerung vorschlagen</b><input type="checkbox" class="sw" id="pOn" ${c.on ? 'checked' : ''}></label>
+      ${stat ? `<p class="faint small num" style="margin:-4px 0 12px">${esc(stat)}</p>` : ''}
+      <div class="fields">${loaded ? inp('pLo', `Untergrenze (${vu})`, tv(c.lo)) : ''}${inp('pHi', loaded ? `Obergrenze (${vu})` : `Ziel (${vu})`, tv(c.hi))}
+      ${inp('pStep', `Schritt (${su})`, pk === 's' && !loaded ? C.timeInput(c.step, e.unit) : C.fmtW(c.step))}${inp('pN', 'Einheiten', c.n, 'numeric')}${inp('pDays', 'innerhalb von Tagen', c.days, 'numeric')}</div>
+      ${src ? `<p class="faint small" style="margin:2px 0 0">Bereich: ${src}</p>` : ''}</div>`;
+  }
+  // Werte aus dem Formular übernehmen; liefert eine Fehlermeldung oder null
+  function readProg(e, oldType) {
+    const g = id => document.getElementById(id);
+    if (!g('pOn') || !C.progable(e)) return null;
+    if (oldType && oldType !== e.type) { delete e.prog; return null; }
+    const old = C.progCfg(S, e), pk = C.perfKey(e), loaded = !!C.LOADED[e.type];
+    const rd = (id, t) => { const el = g(id); if (!el) return null; return t ? C.parseTime(el.value, e.unit) : C.num(el.value); };
+    const hi = rd('pHi', pk === 's'), lo = loaded ? rd('pLo', pk === 's') : (hi === null ? null : Math.max(0, hi - (old.hi - old.lo)));
+    const step = rd('pStep', pk === 's' && !loaded), n = rd('pN'), days = rd('pDays');
+    if (!(hi > 0) || lo === null || lo < 0 || lo > hi || !(step > 0) || !Number.isInteger(n) || n < 2 || n > 12 || !Number.isInteger(days) || days < 7 || days > 120) return 'Prüfe die Werte unter Progression (Einheiten 2–12, Tage 7–120).';
+    const P = { ...(e.prog || {}) }, on = g('pOn').checked;
+    if (on !== C.progDefaultOn(e)) P.on = on; else delete P.on;
+    if (hi !== old.hi || lo !== old.lo) { P.lo = lo; P.hi = hi; P.src = 'user'; }
+    if (step !== old.step) P.step = step;
+    if (n !== old.n) P.n = n;
+    if (days !== old.days) P.days = days;
+    e.prog = P;
+    return null;
   }
   // Stoppuhr für Zeit-Sätze: läuft über Zeitstempel weiter, auch wenn der Bildschirm kurz ausgeht
   const PLAY = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>';
@@ -659,6 +730,7 @@
       <label class="f"><span>Suchbegriffe <span class="faint">(mit Komma)</span></span><input type="text" id="eAlias" value="${esc((e.aliases || []).join(', '))}" placeholder="BP, Bench"></label>
       <label class="check" style="margin:0 0 10px"><input type="checkbox" id="eUni" ${e.uni ? 'checked' : ''}> Einseitig (Gewicht pro Hantel, Wdh. pro Seite)</label>
       <label class="check" style="margin:0 0 18px"><input type="checkbox" id="eFav" ${e.fav ? 'checked' : ''}> Favorit</label>
+      ${C.progable(e) ? progFields(e) : ''}
       <button class="btn primary block" data-act="saveEx" data-arg="${id || ''}:${sessionId || ''}">Speichern</button>
       ${id && !used ? `<div style="height:10px"></div><button class="btn danger block" data-act="deleteEx" data-arg="${id}">Löschen</button>` : ''}
       ${used ? '<p class="faint small">Diese Übung kommt in Einheiten vor und kann deshalb nicht gelöscht werden.</p>' : ''}`;
@@ -724,6 +796,7 @@
     const h = C.exHistory(S, id), m0 = metricOf(ex), m = mUnit(ex, m0), list = C.METRICS[ex.type] || [];
     let out = header(esc(ex.name), infoBtn('ex')) + `<div class="pills" style="margin:0 0 14px"><span class="pill"><i class="cdot" style="--c:${catCol(ex.cat)}"></i>${esc(ex.cat)}</span>${ex.muscle && C.MUSCLES[ex.muscle] ? `<span class="pill">${C.MUSCLES[ex.muscle]}</span>` : ''}<span class="pill">${C.TYPES[ex.type]}</span>${ex.uni ? '<span class="pill">pro Seite</span>' : ''}</div>`;
     if (!h.length) return out + '<p class="muted">Noch keine Einträge.</p>';
+    const ps = progStatus(ex); if (ps) out += `<button class="pick" style="margin:0 0 14px" data-act="open" data-arg="exEdit:${ex.id}"><span class="grow small num">${esc(ps)}</span><span class="chev">›</span></button>`;
     if (!m) {
       return out + `<div class="stats"><div class="stat"><b class="num">${h.length}</b><span>Mal erledigt</span></div><div class="stat"><b class="num" style="font-size:18px">${dNum(h[0].d)}</b><span>Erstes Mal</span></div><div class="stat"><b class="num" style="font-size:18px">${dNum(h[h.length - 1].d)}</b><span>Zuletzt</span></div></div>`;
     }
@@ -1034,7 +1107,7 @@
       <div class="opt"><label class="lbl" for="wLines">Markierungen in kg</label><input type="text" id="wLines" inputmode="decimal" value="${weightLines().map(C.fmtW).join(' ')}" data-change="weightLines" placeholder="z. B. 99 92 88"></div>
       <div class="opt"><label class="lbl" for="hCm">Körpergröße in cm</label><input type="text" id="hCm" inputmode="decimal" value="${S.settings.heightCm || ''}" data-change="height" placeholder="cm"></div></div>
       <p class="faint small" id="persist" style="margin:18px 0 4px">…</p>
-      <p class="faint small" style="margin:0">Dein Leben 2.7.0</p>`;
+      <p class="faint small" style="margin:0">Dein Leben 2.8.0</p>`;
   }
   const DEFAULTS = { dotShape: 'bar', dotLabel: 'none', heuteView: 'tiles', trainStart: 'ask', weightRange: 'auto', backupDays: 7 };
   const iconOf = k => `<span class="sn"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg></span>`;
@@ -1075,8 +1148,31 @@
     return `${header('Gewohnheiten')}
       <button class="btn primary block xl" data-act="open" data-arg="habitEdit" ${a.length >= C.HARD.maxActive ? 'disabled' : ''}>Neue Gewohnheit</button>
       <p class="faint small num" style="margin:8px 4px 0">${a.length} von ${C.HARD.maxActive} aktiv${a.length >= C.HARD.maxActive ? ' · für eine neue erst eine archivieren' : ''}</p>
+      <div class="wlist" style="margin-top:12px"><button class="srow" data-act="open" data-arg="vacations"><span class="sn" style="font-size:20px">🏖</span><b class="grow">Urlaub</b><span class="muted small num">${vacLabel()}</span><span class="chev">›</span></button></div>
       ${a.length ? `<div class="lbl mon">Reihenfolge auf „Heute“</div><div class="wlist">${a.map((h, i) => `<div class="srow">${open(h)}${upDown('moveHabit', i, last, esc(h.name))}</div>`).join('')}</div>` : ''}
       ${z.length ? `<div class="lbl mon">Archiviert</div><div class="wlist">${z.map(h => `<div class="srow">${open(h)}<span class="chev">›</span></div>`).join('')}</div>` : ''}`;
+  }
+  // ===== URLAUB =====
+  function vacLabel() {
+    const d = today(), now = C.vacOn(S, d), next = (S.vacations || []).filter(v => v.from > d).sort((x, y) => x.from.localeCompare(y.from))[0];
+    return now ? `bis ${dNum(now.to).slice(0, 6)}` : next ? `ab ${dNum(next.from).slice(0, 6)}` : '';
+  }
+  function screenVacations() {
+    const d = today(), min = C.addDays(d, -C.VAC_BACK), act = activeHabits(), n = act.filter(h => h.vac === false).length;
+    const list = [...(S.vacations || [])].sort((x, y) => y.from.localeCompare(x.from));
+    let out = `${header('Urlaub', infoBtn('vac'))}
+      <p class="faint small num" style="margin:0 4px 12px">${n} von ${act.length} Gewohnheiten pausieren im Urlaub</p>
+      <div class="card"><div class="fields"><label class="f"><span>Von</span><input type="date" id="vFrom" min="${min}" value="${d}"></label>
+      <label class="f"><span>Bis</span><input type="date" id="vTo" min="${min}" value="${C.addDays(d, 6)}"></label></div>
+      <button class="btn primary block" data-act="addVac">Eintragen</button></div>`;
+    if (list.length) out += `<div class="lbl mon">Zeiträume</div><div class="wlist">${list.map(v => {
+      const tag = v.from <= d && v.to >= d ? ' · läuft' : v.from > d ? ' · geplant' : '', edit = v.to >= C.addDays(min, -1);
+      const yr = v.to.slice(0, 4) !== d.slice(0, 4) ? ` · ${v.to.slice(0, 4)}` : '';
+      return `<div class="srow"><span class="grow" style="min-width:0"><b class="num">${dNum(v.from).slice(0, 6)}–${dNum(v.to).slice(0, 6)}</b><span class="faint small num" style="display:block">${C.diffDays(v.from, v.to) + 1} Tage${tag}${yr}</span></span>
+        ${edit ? `<input type="date" class="vto" aria-label="Ende ändern" value="${v.to}" min="${v.from}" data-change="vacTo" data-arg="${v.id}">` : ''}
+        <button class="iconbtn sm" data-act="delVac" data-arg="${v.id}" aria-label="Urlaub löschen">✕</button></div>`;
+    }).join('')}</div>`;
+    return out;
   }
   const DIFF = ['Leicht', 'Eher leicht', 'Mittel', 'Schwer', 'Sehr schwer'];
   function screenRing() {
@@ -1179,7 +1275,7 @@
   function logGoal(year, action, title, reason) { S.goalLog.push({ t: C.nowLocal(), year: String(year), action, title, reason: reason || '' }); }
 
   const TABS = { heute: viewHeute, ziele: viewZiele, training: viewTraining, gewicht: viewGewicht, mehr: viewMehr };
-  const SCREENS = { stats: screenStats, month: screenMonth, equip: screenEquip, tabOrder: screenTabOrder, ring: screenRing, cats: screenCats, catEdit: screenCatEdit, habit: screenHabit, habitEdit: screenHabitEdit, session: screenSession, move: screenMove, exercises: screenExercises, exEdit: screenExEdit, pauses: screenPauses, weights: screenWeights, measure: screenMeasure, heuteLook: screenHeuteLook, body: screenBody, wstats: screenWStats, habits: screenHabits, goalEdit: screenGoalEdit, progress: screenProgress, exStats: screenExStats };
+  const SCREENS = { vacations: screenVacations, stats: screenStats, month: screenMonth, equip: screenEquip, tabOrder: screenTabOrder, ring: screenRing, cats: screenCats, catEdit: screenCatEdit, habit: screenHabit, habitEdit: screenHabitEdit, session: screenSession, move: screenMove, exercises: screenExercises, exEdit: screenExEdit, pauses: screenPauses, weights: screenWeights, measure: screenMeasure, heuteLook: screenHeuteLook, body: screenBody, wstats: screenWStats, habits: screenHabits, goalEdit: screenGoalEdit, progress: screenProgress, exStats: screenExStats };
 
   // ---------- Sheets ----------
   const INFOS = {
@@ -1202,6 +1298,16 @@
     ring: ['Gewichtung', () => `<p><b>Schwierigkeit 1–5</b> legt fest, wie stark eine Gewohnheit den Wochenring füllt. Die Anteile ergeben zusammen immer 100 %.</p>
       <p><b>Rechnung:</b> Jede Gewohnheit trägt ihren Anteil × ihre Erfüllung bei. Beispiel: Sport 3× pro Woche mit 50 %, einmal erledigt → 1/3 × 50 % ≈ 17 %.</p>
       <p><b>Ausgeschaltet:</b> bleibt auf „Heute“, zählt aber nicht im Ring.</p>`],
+    vac: ['Urlaub', () => `<p><b>Pausiert</b> eine Gewohnheit im Urlaub, zählen Urlaubstage weder als erledigt noch als verpasst. Serien laufen weiter, Quoten rechnen ohne diese Tage. Abhaken geht trotzdem und zählt.</p>
+      <p><b>X-mal pro Woche:</b> Nur eine ganze Urlaubswoche (Mo–So) ist frei, sonst gilt das volle Wochenziel.</p>
+      <p><b>Wochenring:</b> Urlaubstage pausierter Gewohnheiten zählen hier gar nicht. Läuft wegen Urlaub nichts, zeigt er 🏖, und die Serie pausiert.</p>
+      <p><b>Feste Regeln:</b> Mindestdauer und 98-%-Fenster verlängern sich um die Urlaubstage. In der Bindung lässt sich „Auch im Urlaub“ nur ein-, nicht ausschalten.</p>
+      <p><b>Eintragen</b> höchstens ${C.VAC_BACK} Tage rückwirkend. Verkürzen und Löschen gehen immer.</p>`],
+    prog: ['Progression', () => `<p><b>Steigerung</b> schlägt die App vor, wenn du in den letzten ${C.PROG.n} Einheiten innerhalb von ${C.PROG.days} Tagen mit demselben Gewicht in allen Arbeitssätzen (mind. ${C.PROG.minSets}) die Obergrenze geschafft hast. Leichtere Aufwärmsätze zählen nicht.</p>
+      <p><b>Schritt:</b> immer der kleinste. Ist er größer als 10 % des Gewichts, brauchst du vorher ${C.PROG.extraR} Wdh. mehr (bei Zeit und Strecke 20 % mehr). Höchstens eine Steigerung je 4 Wochen.</p>
+      <p><b>Beschwerden</b> in einer Einheit sperren Steigerungen für 4 Wochen, danach zählen die Einheiten neu. Leichter werden geht immer. Pausierte Kategorien bekommen keine Vorschläge.</p>
+      <p><b>Über 3 Wochen Pause:</b> Vorschlag mit etwa 90 % (Vorsichtsregel). <b>Rückschritt:</b> Liegt in 2 Einheiten nacheinander mit demselben Gewicht mindestens die Hälfte der Sätze unter der Untergrenze, schlägt die App das vorige Gewicht vor.</p>
+      <p><b>Bereich:</b> aus deinen letzten 8 Einheiten abgeleitet (Obergrenze = typische Zahl), ohne Daten 8–12. Je Übung änderbar. Nichts ändert sich ohne dein „Übernehmen“.</p>`],
     hard: ['Feste Regeln', () => `<p><b>Höchstens ${C.HARD.maxActive}</b> aktive Gewohnheiten, davon <b>eine</b> sehr schwere (Stufe 5).</p>
       <p><b>Sehr schwer</b> bleibt mindestens 4 Monate. Herabstufen auf „schwer“, sobald die letzten 4 Monate zu mindestens 98 % erfüllt sind.</p>
       <p><b>Bewährung:</b> danach 2 Monate „schwer“, wieder mindestens 98 %. Bis dahin keine weitere schwere oder sehr schwere Gewohnheit.</p>
@@ -1261,7 +1367,7 @@
       start: g('hStart').value || today(), color: ui.draftColor, typeVal: t && !t.disabled ? t.value : null,
       target: tIn ? Math.max(1, Math.min(7, Math.round(C.num(tIn.value) || 3))) : null, targetFrom: from ? from.value : null,
       goalKg: g('hGoalKg') ? C.num(g('hGoalKg').value) : null, goalDate: g('hGoalDate') ? g('hGoalDate').value : null,
-      diff: Number((g('hDiff') || {}).value) || 3
+      diff: Number((g('hDiff') || {}).value) || 3, vac: g('hVac') ? g('hVac').checked : null
     };
   }
   // Stufe setzen und Bindung führen; Erlaubnis prüft der Aufrufer
@@ -1284,6 +1390,7 @@
     if (C.hardBound(g.st) && h0) {
       const curT = C.targetAt(h0, C.weekStart(today()));
       if (h0.type === 'weekly' && f.target && f.target < curT) { toast('Während der Bindung kann das Wochenziel nicht sinken.'); return false; }
+      if (h0.vac !== false && f.vac === false) { toast('Während der Bindung läuft sie auch im Urlaub weiter.'); return false; }
     }
     if (h0 && h0.link === 'weightgoal' && (!f.goalKg || f.goalKg < 30 || f.goalKg > 300)) { toast('Prüfe das Zielgewicht.'); return false; }
     if (h0 && h0.link === 'weightgoal' && !f.goalDate) { toast('Gib einen Stichtag an.'); return false; }
@@ -1294,6 +1401,7 @@
     const a = f.id, h = h0 || { id: uid('h'), link: null, archived: false, created: today() };
     h.name = f.name; h.emoji = f.emoji; h.plan = f.plan || undefined;
     h.start = f.start; h.color = f.color || h.color || COLORS[3];
+    if (f.vac !== null && f.vac !== undefined) h.vac = f.vac;
     const newT = f.target, wasWeekly = h.type === 'weekly';
     if (f.typeVal) { const v = f.typeVal; h.type = v === 'weekly' ? 'weekly' : 'daily'; h.kind = v === 'verzicht' ? 'verzicht' : undefined; }
     if (h.type === 'weekly' && newT) {
@@ -1421,6 +1529,26 @@
       s.items.push({ ex, sets: l ? cloneSets(l.item.sets) : (e.type === 'done' ? [] : [{}]), note: '', done: false });
       save(); closeSheet(); setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 150);
     },
+    pain: a => { const { it } = findSet(a + ':0:x'); if (!it) return; if (it.pain) delete it.pain; else it.pain = true; save(); render(); },
+    progNo: a => { const { it } = findSet(a + ':0:x'); if (!it) return; it.progNo = true; save(); render(); },
+    progOk: a => {
+      const { s, it } = findSet(a + ':0:x'); if (!it) return;
+      const ex = C.exById(S, it.ex), p = C.progFor(S, it.ex, s, it); if (!ex || !p) return;
+      if (p.k === 'goal') { ex.prog = { ...(ex.prog || {}), lo: p.lo, hi: p.hi, src: 'user', raised: s.date }; toast(`Neues Ziel: ${fmtPerf(ex, p.hi)}`); }
+      else if (p.w !== undefined) {
+        const sign = ex.type === 'assist' ? -1 : 1, same = x => typeof x.w !== 'number' || Math.abs(x.w) === Math.abs(p.from);
+        if (!it.sets.length) it.sets.push({});
+        for (const x of it.sets) if (same(x)) x.w = sign * p.w;
+        toast(`${fmtLoad(ex, p.w)} eingetragen`);
+      } else return;
+      it.progOk = p.k; save(); render();
+    },
+    addVac: () => {
+      const v = { id: uid('v'), from: document.getElementById('vFrom').value, to: document.getElementById('vTo').value };
+      const err = C.vacCheck(S, v, null, today()); if (err) return toast(err);
+      S.vacations.push(v); S.vacations.sort((x, y) => x.from.localeCompare(y.from)); save(); render(); toast('Urlaub eingetragen');
+    },
+    delVac: a => { if (!confirm('Urlaub löschen? Die Tage zählen dann wieder normal.')) return; S.vacations = S.vacations.filter(v => v.id !== a); save(); render(); },
     addSet: a => { const [sid, idx] = a.split(':'); const it = S.sessions.find(x => x.id === sid).items[Number(idx)]; it.sets.push(it.sets.length ? { ...it.sets[it.sets.length - 1] } : {}); save(); render(); },
     stopwatch: a => {
       if (ui.sw && ui.sw.key === a) {
@@ -1435,12 +1563,14 @@
     moveItem: a => { if (ui.sw) stopSw(); const [sid, idx, dir] = a.split(':'); const it = S.sessions.find(x => x.id === sid).items; const i = Number(idx), j = i + Number(dir); if (j < 0 || j >= it.length) return; [it[i], it[j]] = [it[j], it[i]]; save(); render(); },
     saveEx: a => {
       const [id, sid] = a.split(':'); const name = document.getElementById('eName').value.trim(); if (!name) return toast('Gib der Übung einen Namen.');
-      const e = id ? C.exById(S, id) : { id: uid('e') };
+      const e = id ? C.exById(S, id) : { id: uid('e') }, oldType = id ? e.type : null, before = JSON.stringify(e);
       e.name = name; e.cat = document.getElementById('eCat').value; e.type = document.getElementById('eType').value; e.uni = document.getElementById('eUni').checked;
       e.muscle = document.getElementById('eMuscle').value || null; e.equip = document.getElementById('eEquip').value; e.fav = document.getElementById('eFav').checked;
       e.m2 = [...document.querySelectorAll('input[name=eM2]:checked')].map(x => x.value).filter(k => k !== e.muscle);
       e.aliases = document.getElementById('eAlias').value.split(',').map(x => x.trim()).filter(Boolean);
       if (['time', 'wtime'].includes(e.type) && document.getElementById('eUnit').value === 'min') e.unit = 'min'; else delete e.unit;
+      const perr = readProg(e, oldType);
+      if (perr) { if (id) Object.assign(e, JSON.parse(before)); return toast(perr); }
       if (!id) S.exercises.push(e);
       if (sid) { const s = S.sessions.find(x => x.id === sid); s.items.push({ ex: e.id, sets: e.type === 'done' ? [] : [{}], note: '', done: false }); }
       save(); pop(); toast('Gespeichert');
@@ -1544,6 +1674,11 @@
     }
   };
   const CHANGES = {
+    vacTo: (el, a) => {
+      const v = S.vacations.find(x => x.id === a); if (!v) return;
+      const err = C.vacCheck(S, { ...v, to: el.value }, v, today()); if (err) { toast(err); render(); return; }
+      v.to = el.value; save(); render();
+    },
     restore: el => {
       const f = el.files && el.files[0]; if (!f) return;
       const r = new FileReader();

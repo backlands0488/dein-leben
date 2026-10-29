@@ -40,7 +40,7 @@
     return {
       app: 'dein-leben', version: 1, settings: { heightCm: null }, habits: [], checks: {}, weights: [],
       measurements: [], exercises: DEFAULT_EXERCISES.map(([id, name, cat, type, uni]) => ({ id, name, cat, type, uni })),
-      sessions: [], pauses: [], lastBackup: null, notices: []
+      sessions: [], pauses: [], vacations: [], lastBackup: null, notices: []
     };
   }
   function validate(s) {
@@ -48,7 +48,7 @@
     for (const k of ['habits', 'weights', 'exercises', 'sessions']) if (!Array.isArray(s[k])) throw new Error(`Die Datei ist unvollständig (${k} fehlt).`);
     s.checks = s.checks || {}; s.measurements = s.measurements || []; s.pauses = s.pauses || [];
     s.settings = s.settings || {}; s.notices = s.notices || [];
-    s.goals = s.goals || []; s.goalLog = s.goalLog || [];
+    s.goals = s.goals || []; s.goalLog = s.goalLog || []; s.vacations = s.vacations || [];
     migrateKfa(s);
     migrateCatalog(s);
     migrateHard(s);
@@ -159,6 +159,32 @@
   };
   const measurementDue = (ms, today = todayStr()) => !ms.some(m => m.t.slice(0, 10) >= quarterStart(today));
 
+  // ---------- Urlaub ----------
+  // state.vacations = [{ id, from, to }] (beide Tage eingeschlossen). Eine Gewohnheit mit h.vac === false pausiert im Urlaub:
+  // Urlaubstage zählen dann weder als erledigt noch als verpasst; Erledigtes zählt trotzdem. Ohne Angabe läuft sie weiter.
+  // Eintragen höchstens VAC_BACK Tage rückwirkend, damit sich gerissene Serien nicht nachträglich retten lassen.
+  const VAC_BACK = 3, NONE = new Set();
+  let vacMemo = { k: null, set: NONE };
+  function vacSet(state) {
+    const k = JSON.stringify(state.vacations || []);
+    if (vacMemo.k !== k) { const s = new Set(); for (const v of state.vacations || []) for (const d of dayRange(v.from, v.to)) s.add(d); vacMemo = { k, set: s }; }
+    return vacMemo.set;
+  }
+  const offDays = (state, h) => h && h.vac === false ? vacSet(state) : NONE;
+  const vacOn = (state, day) => (state.vacations || []).find(v => v.from <= day && v.to >= day) || null;
+  // Ganze Woche (Mo–So) frei: nur dann zählt eine „X-mal pro Woche“-Gewohnheit in dieser Woche nicht
+  const weekOff = (off, ws) => { if (!off.size) return false; for (let i = 0; i < 7; i++) if (!off.has(addDays(ws, i))) return false; return true; };
+  // Neue oder geänderte Zeiträume prüfen; liefert eine Fehlermeldung oder null
+  function vacCheck(state, v, old, today = todayStr()) {
+    if (!v.from || !v.to) return 'Bitte beide Daten angeben.';
+    if (v.to < v.from) return 'Das Ende liegt vor dem Beginn.';
+    const min = addDays(today, -VAC_BACK);
+    const added = [...dayRange(v.from, v.to)].filter(d => !old || d < old.from || d > old.to);
+    if (added.some(d => d < min)) return `Urlaub lässt sich höchstens ${VAC_BACK} Tage rückwirkend eintragen.`;
+    if ((state.vacations || []).some(x => x !== old && x.id !== (old && old.id) && x.from <= v.to && x.to >= v.from)) return 'Überschneidet sich mit einem anderen Urlaub.';
+    return null;
+  }
+
   // ---------- Gewohnheiten ----------
   function sportDays(state, from) {
     const set = new Set();
@@ -173,11 +199,12 @@
     if (h.link === 'sport') return sportDays(state, h.start);
     return new Set(Object.keys(state.checks[h.id] || {}).filter(d => d >= h.start));
   }
-  function streaksDaily(days, start, today) {
+  // Urlaubstage (off) ohne Haken unterbrechen keine Serie und zählen nicht mit
+  function streaksDaily(days, start, today, off = NONE) {
     let best = 0, run = 0;
-    for (const d of dayRange(start, today)) { if (days.has(d)) { run++; best = Math.max(best, run); } else run = 0; }
+    for (const d of dayRange(start, today)) { if (days.has(d)) { run++; best = Math.max(best, run); } else if (!off.has(d)) run = 0; }
     let cur = 0; let d = days.has(today) ? today : addDays(today, -1);
-    while (d >= start && days.has(d)) { cur++; d = addDays(d, -1); }
+    while (d >= start) { if (days.has(d)) cur++; else if (!off.has(d)) break; d = addDays(d, -1); }
     return { cur, best };
   }
   function weekCount(days, ws) { let n = 0; for (let i = 0; i < 7; i++) if (days.has(addDays(ws, i))) n++; return n; }
@@ -186,53 +213,55 @@
     const list = (h.targets || []).filter(x => x.from <= ws).sort((a, b) => a.from.localeCompare(b.from));
     return list.length ? list[list.length - 1].target : h.target;
   }
-  function streaksWeekly(days, start, today, tgt) {
+  // Ganze Urlaubswochen ohne erreichtes Ziel werden übersprungen
+  function streaksWeekly(days, start, today, tgt, off = NONE) {
     const w0 = weekStart(start), wNow = weekStart(today);
     let best = 0, run = 0;
     for (let w = w0; w <= wNow; w = addDays(w, 7)) {
-      if (weekCount(days, w) >= tgt(w)) { run++; best = Math.max(best, run); } else if (w !== wNow) run = 0;
+      if (weekCount(days, w) >= tgt(w)) { run++; best = Math.max(best, run); } else if (w !== wNow && !weekOff(off, w)) run = 0;
     }
     let cur = 0; let w = weekCount(days, wNow) >= tgt(wNow) ? wNow : addDays(wNow, -7);
-    while (w >= w0 && weekCount(days, w) >= tgt(w)) { cur++; w = addDays(w, -7); }
+    while (w >= w0) { if (weekCount(days, w) >= tgt(w)) cur++; else if (!weekOff(off, w)) break; w = addDays(w, -7); }
     return { cur, best };
   }
-  function quotaDaily(days, start, a, b, today) {
+  function quotaDaily(days, start, a, b, today, off = NONE) {
     const from = a > start ? a : start, to = b < today ? b : today;
     if (from > to) return null;
-    let n = 0, t = 0; for (const d of dayRange(from, to)) { t++; if (days.has(d)) n++; }
-    return { n, t, pct: n / t };
+    let n = 0, t = 0; for (const d of dayRange(from, to)) { if (days.has(d)) { t++; n++; } else if (!off.has(d)) t++; }
+    return t ? { n, t, pct: n / t } : null;
   }
-  function quotaWeekly(days, start, a, b, today, tgt) {
+  function quotaWeekly(days, start, a, b, today, tgt, off = NONE) {
     // Wochen, die im Zeitraum beginnen; laufende Woche zählt nur, wenn schon erreicht
     let n = 0, t = 0; const wNow = weekStart(today);
     for (let w = weekStart(a < start ? start : a); w <= b && w <= wNow; w = addDays(w, 7)) {
       if (w < a) continue;
       const ok = weekCount(days, w) >= tgt(w);
       if (w === wNow && !ok) continue;
+      if (!ok && weekOff(off, w)) continue;
       t++; if (ok) n++;
     }
     return t ? { n, t, pct: n / t } : null;
   }
   function habitStats(state, h, today = todayStr()) {
-    const days = checkedDays(state, h);
+    const days = checkedDays(state, h), off = offDays(state, h);
     const end = h.archived && h.archivedOn && h.archivedOn < today ? h.archivedOn : today;
     const total = [...days].filter(d => d <= end).length;
     if (h.type === 'weekly') {
       const tgt = w => targetAt(h, w);
-      const st = streaksWeekly(days, h.start, end, tgt);
+      const st = streaksWeekly(days, h.start, end, tgt, off);
       return {
-        days, total, unit: 'Wochen', ...st,
+        days, off, total, unit: 'Wochen', ...st,
         week: { n: weekCount(days, weekStart(end)), t: tgt(weekStart(end)) },
-        month: quotaWeekly(days, h.start, monthStart(end), monthEnd(end), end, tgt),
-        year: quotaWeekly(days, h.start, yearStart(end), yearEnd(end), end, tgt)
+        month: quotaWeekly(days, h.start, monthStart(end), monthEnd(end), end, tgt, off),
+        year: quotaWeekly(days, h.start, yearStart(end), yearEnd(end), end, tgt, off)
       };
     }
-    const st = streaksDaily(days, h.start, end);
+    const st = streaksDaily(days, h.start, end, off);
     return {
-      days, total, unit: 'Tage', ...st,
-      week: quotaDaily(days, h.start, weekStart(end), addDays(weekStart(end), 6), end),
-      month: quotaDaily(days, h.start, monthStart(end), monthEnd(end), end),
-      year: quotaDaily(days, h.start, yearStart(end), yearEnd(end), end)
+      days, off, total, unit: 'Tage', ...st,
+      week: quotaDaily(days, h.start, weekStart(end), addDays(weekStart(end), 6), end, off),
+      month: quotaDaily(days, h.start, monthStart(end), monthEnd(end), end, off),
+      year: quotaDaily(days, h.start, yearStart(end), yearEnd(end), end, off)
     };
   }
   // Gewichtsziel: erreicht oder abgelaufen -> archivieren
@@ -547,18 +576,37 @@ mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
   }
   // Beginn des Fensters von m Monaten, das am Tag e endet
   const winStart = (e, m) => addMonths(addDays(e, 1), -m);
+  // Mit Urlaub (Gewohnheit pausiert): Das Fenster reicht so weit zurück, dass es so viele zählende Tage bzw. Wochen enthält
+  // wie m Kalendermonate. Urlaub verlängert die Fristen also, statt sie zu verkürzen.
+  function winFrom(h, e, m, days, off) {
+    const a0 = winStart(e, m);
+    if (!off.size) return a0;
+    if (h.type === 'weekly') {
+      let K = 0; for (let w = weekStart(a0); w <= e; w = addDays(w, 7)) if (w >= a0 && addDays(w, 6) <= e) K++;
+      let w = weekStart(e); if (addDays(w, 6) > e) w = addDays(w, -7);
+      let k = 0, a = a0;
+      for (let i = 0; i < 2000 && k < K; i++, w = addDays(w, -7)) { if (!(weekOff(off, w) && weekCount(days, w) < targetAt(h, w))) k++; a = w; }
+      return a < a0 ? a : a0;
+    }
+    const L = diffDays(a0, e) + 1;
+    let a = e, k = 0;
+    for (let i = 0; i < 5000; i++) { if (!off.has(a) || days.has(a)) k++; if (k >= L) return a; a = addDays(a, -1); }
+    return a;
+  }
   // Erfüllung im Fenster [a, b]. Offenes (heute, laufende Woche, Zukunft) zählt bei assume als erledigt, sonst gar nicht.
-  // Täglich: Tage. X-mal pro Woche: Einheiten bis zum Wochenziel, nur ganze Wochen im Fenster.
-  function winQuota(state, h, a, b, today, assume, days = checkedDays(state, h)) {
+  // Täglich: Tage. X-mal pro Woche: Einheiten bis zum Wochenziel, nur ganze Wochen im Fenster. Urlaub ohne Haken zählt nicht.
+  function winQuota(state, h, a, b, today, assume, days = checkedDays(state, h), off = offDays(state, h)) {
     let n = 0, t = 0;
     if (h.type === 'weekly') {
       for (let w = weekStart(a); w <= b; w = addDays(w, 7)) {
         if (w < a || addDays(w, 6) > b) continue;
         const T = targetAt(h, w), c = Math.min(T, weekCount(days, w));
+        if (c < T && weekOff(off, w)) continue;
         if (addDays(w, 6) < today || c >= T) { t += T; n += c; } else if (assume) { t += T; n += T; }
       }
     } else {
       for (const d of dayRange(a, b)) {
+        if (off.has(d) && !days.has(d)) continue;
         if (d < today || days.has(d)) { t++; if (days.has(d)) n++; } else if (assume) { t++; n++; }
       }
     }
@@ -570,26 +618,40 @@ mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
     if (h.type === 'weekly') { const w = weekStart(today); return weekCount(days, w) >= targetAt(h, w) ? addDays(w, 6) : addDays(w, -1); }
     return days.has(today) ? today : addDays(today, -1);
   }
-  function passes(state, h, s, m, today, days = checkedDays(state, h)) {
-    const b = doneEnd(h, today, days), a = winStart(b, m);
+  function passes(state, h, s, m, today, days = checkedDays(state, h), off = offDays(state, h)) {
+    const b = doneEnd(h, today, days), a = winFrom(h, b, m, days, off);
     if (a < s) return false;
-    const q = winQuota(state, h, a, b, today, false, days);
+    const q = winQuota(state, h, a, b, today, false, days, off);
     return q.t > 0 && q.n >= needFor(q.t);
   }
-  // Frühestes Fensterende: volle m Monate ab s und nicht vor dem laufenden Tag bzw. der laufenden Woche
-  function firstEnd(h, s, m, today) {
+  // Frühestes Ende eines vollen Fensters ab s (Urlaub verlängert es)
+  function minEnd(h, s, m, days, off) {
     let e = addDays(addMonths(s, m), -1);
-    if (h.type === 'weekly') { e = addDays(weekStart(e), 6); const now = addDays(weekStart(today), 6); return e > now ? e : now; }
+    if (h.type === 'weekly') e = addDays(weekStart(e), 6);
+    if (!off.size) return e;
+    const st = h.type === 'weekly' ? 7 : 1;
+    for (let i = 0; i < 1000 && winFrom(h, e, m, days, off) < s; i++) e = addDays(e, st);
+    return e;
+  }
+  // Frühestes Fensterende: volle m Monate ab s und nicht vor dem laufenden Tag bzw. der laufenden Woche
+  function firstEnd(h, s, m, today, days = NONE, off = NONE) {
+    const e = minEnd(h, s, m, days, off);
+    if (h.type === 'weekly') { const now = addDays(weekStart(today), 6); return e > now ? e : now; }
     return e > today ? e : today;
+  }
+  // Ab wann die Mindestdauer erfüllt ist (ohne Urlaub: genau m Monate nach s)
+  function hardFrom(state, h, s, m) {
+    const off = offDays(state, h);
+    return off.size ? addDays(minEnd(h, s, m, checkedDays(state, h), off), 1) : addMonths(s, m);
   }
   // Puffer: wie viele Fehltage (bzw. Einheiten) noch erlaubt sind, und ab wann es frühestens reicht, wenn ab jetzt alles klappt
   function bufferInfo(state, h, s, m, today) {
-    const days = checkedDays(state, h), wk = h.type === 'weekly', step = wk ? 7 : 1;
-    let e = firstEnd(h, s, m, today);
-    const q = winQuota(state, h, winStart(e, m), e, today, true, days), need = needFor(q.t);
+    const days = checkedDays(state, h), off = offDays(state, h), wk = h.type === 'weekly', step = wk ? 7 : 1;
+    let e = firstEnd(h, s, m, today, days, off);
+    const q = winQuota(state, h, winFrom(h, e, m, days, off), e, today, true, days, off), need = needFor(q.t);
     const out = { rest: q.n - need, t: q.t, miss: q.t - need, unit: wk ? 'Einheiten' : 'Tage', at: null };
     for (let i = 0; i < 800 / step; i++, e = addDays(e, step)) {
-      const r = winQuota(state, h, winStart(e, m), e, today, true, days);
+      const r = winQuota(state, h, winFrom(h, e, m, days, off), e, today, true, days, off);
       if (r.t > 0 && r.n >= needFor(r.t)) { out.at = wk ? addDays(weekStart(e), Math.max(0, targetAt(h, weekStart(e)) - 1)) : e; break; }
     }
     if (out.at && wk && out.at < today) out.at = today;
@@ -602,8 +664,8 @@ mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
     const until = addMonths(p.start5, HARD.block);
     if (h.archived) return { phase: 'arch', p, until, blocks: today < until };
     const pend = today < p.start5; // Bedenkzeit: Beginn liegt noch vor uns
-    if (diffOf(h) === 5) return { phase: 5, p, pend, blocks: true, ok: !!p.ok5, from: addMonths(p.start5, HARD.m5), until, buf: pend ? null : bufferInfo(state, h, p.start5, HARD.m5, today) };
-    if (p.start4) return { phase: 4, p, blocks: true, from: addMonths(p.start4, HARD.m4), buf: bufferInfo(state, h, p.start4, HARD.m4, today) };
+    if (diffOf(h) === 5) return { phase: 5, p, pend, blocks: true, ok: !!p.ok5, from: hardFrom(state, h, p.start5, HARD.m5), until, buf: pend ? null : bufferInfo(state, h, p.start5, HARD.m5, today) };
+    if (p.start4) return { phase: 4, p, blocks: true, from: hardFrom(state, h, p.start4, HARD.m4), buf: bufferInfo(state, h, p.start4, HARD.m4, today) };
     return null;
   }
   // Gebunden = Art und Wochenziel dürfen nicht leichter werden, Löschen nicht möglich
@@ -740,6 +802,132 @@ mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
     return [...best.values()].sort((a, b) => a.r - b.r);
   }
 
+  // ---------- Progression (mit Landry abgestimmt, Oktober 2026) ----------
+  // Vorschlag, nie automatisch. Steigerung, wenn in den letzten n Einheiten (Standard 4) innerhalb von days Tagen (30)
+  // mit demselben Arbeitsgewicht alle Arbeitssätze (mind. 2) die Obergrenze erreicht haben. Immer nur der kleinste Schritt.
+  // 10-%-Grenze: Ist der Schritt größer als 10 % des Gewichts, erst Obergrenze + 2 Wdh. (bei Zeit/Strecke × 1,2).
+  // Höchstens eine Steigerung je 4 Wochen. Beschwerden sperren 4 Wochen, danach zählt neu. Kategorie pausiert: nichts.
+  // Lücke über 3 Wochen: Wiedereinstieg mit etwa 90 % (Vorsichtsregel). Rückschritt: in 2 Einheiten nacheinander mit
+  // demselben Gewicht lag mindestens die Hälfte der Arbeitssätze unter der Untergrenze.
+  const PROG = { n: 4, days: 30, cap: 0.10, extraR: 2, extraF: 1.2, gap: 21, back: 0.9, pain: 28, once: 28, minSets: 2, lowR: 2, lowF: 0.8 };
+  const LOADED = { weight: ['w', 'r'], assist: ['w', 'r'], wtime: ['w', 's'], sled: ['w', 'm'] };
+  const UNLOADED = { reps: 'r', time: 's' };
+  const progable = ex => !!ex && !!(LOADED[ex.type] || UNLOADED[ex.type]);
+  const perfKey = ex => LOADED[ex.type] ? LOADED[ex.type][1] : UNLOADED[ex.type];
+  const PERF_UNIT = { r: 'Wdh.', s: 'Sek.', m: 'm' };
+  function stepDefault(ex) {
+    if (ex.type === 'reps') return 1;
+    if (ex.type === 'time') return 5;
+    if (ex.type === 'assist' || ex.type === 'sled') return 5;
+    return ex.equip === 'lh' || ex.equip === 'sz' ? 1 : 2.5;
+  }
+  const progDefaultOn = ex => progable(ex) && !['Reha', 'Ausdauer'].includes(ex.cat) && ex.muscle !== 'mobil';
+  const loadOf = (ex, x) => ex.type === 'assist' ? Math.abs(x.w) : x.w;
+  // schwerer = mehr Gewicht, beim Gegengewicht weniger Hilfe
+  const harder = (ex, a, b) => ex.type === 'assist' ? a < b : a > b;
+  const rnd = (v, st) => Math.round(Math.round(v / st) * st * 100) / 100;
+  // Arbeitssätze: alle Sätze mit dem schwersten Gewicht der Einheit; leichtere (Aufwärmen) zählen nicht
+  function workSets(ex, sets) {
+    const pk = perfKey(ex), lk = LOADED[ex.type] ? 'w' : null;
+    const ok = (sets || []).filter(x => isNum(x[pk]) && x[pk] > 0 && (!lk || isNum(x.w)));
+    if (!ok.length) return null;
+    if (!lk) return { load: null, perf: ok.map(x => x[pk]) };
+    const ls = ok.map(x => loadOf(ex, x)), best = ex.type === 'assist' ? Math.min(...ls) : Math.max(...ls);
+    return { load: best, perf: ok.filter(x => loadOf(ex, x) === best).map(x => x[pk]) };
+  }
+  // Einträge einer Übung vor einer Einheit (sess = { id, date }; id null = nächste Einheit)
+  function progHist(state, ex, sess) {
+    const ts = trainings(state), i = sess.id ? ts.findIndex(s => s.id === sess.id) : -1;
+    const out = [];
+    for (const s of (i < 0 ? ts : ts.slice(0, i))) {
+      if (s.date > sess.date || s.id === sess.id) continue;
+      for (const it of s.items || []) if (it.ex === ex.id) { const w = workSets(ex, it.sets); if (w || it.pain) out.push({ d: s.date, w, pain: !!it.pain }); }
+    }
+    return out;
+  }
+  const median = a => { const b = [...a].sort((x, y) => x - y), m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; };
+  // Bereich aus den letzten 8 Einheiten ableiten: Obergrenze = Median der Arbeitssätze, Untergrenze 2 Wdh. (bzw. 20 %) darunter
+  function progDerive(state, ex) {
+    const h = progHist(state, ex, { id: null, date: '9999-12-31' }).filter(x => x.w).slice(-8);
+    if (h.length < 3) return null;
+    const pk = perfKey(ex), m = median(h.flatMap(x => x.w.perf));
+    const hi = pk === 'r' ? Math.max(1, Math.round(m)) : Math.max(5, rnd(m, 5));
+    return { hi, lo: pk === 'r' ? Math.max(1, hi - PROG.lowR) : rnd(hi * PROG.lowF, 1), src: 'abg' };
+  }
+  function progStd(ex) {
+    const pk = perfKey(ex);
+    if (pk === 'r') return ex.type === 'reps' ? { lo: 8, hi: 10 } : { lo: 8, hi: 12 };
+    if (pk === 's') return { lo: 24, hi: 30 };
+    return { lo: 16, hi: 20 };
+  }
+  // Einstellungen einer Übung mit Standardwerten
+  function progCfg(state, ex) {
+    const p = ex.prog || {}, r = p.hi ? { lo: p.lo, hi: p.hi } : (progDerive(state, ex) || progStd(ex));
+    return { on: p.on === undefined ? progDefaultOn(ex) : !!p.on, lo: r.lo, hi: r.hi, step: p.step || stepDefault(ex), n: p.n || PROG.n, days: p.days || PROG.days, src: p.hi ? (p.src || 'user') : (r.src || 'std'), raised: p.raised || null };
+  }
+  // Abgeleitete Bereiche festschreiben, sobald es genug Daten gibt; später ändert nur Landry sie
+  function settleProg(state) {
+    let ch = false;
+    for (const ex of state.exercises) {
+      if (!progable(ex) || (ex.prog && ex.prog.hi)) continue;
+      const d = progDerive(state, ex); if (!d) continue;
+      ex.prog = { ...(ex.prog || {}), lo: d.lo, hi: d.hi, src: 'abg' }; ch = true;
+    }
+    return ch;
+  }
+  const stepUp = (ex, w, st) => ex.type === 'assist' ? Math.max(0, rnd(w - st, 0.01)) : rnd(w + st, 0.01);
+  const stepDown = (ex, w, st) => ex.type === 'assist' ? rnd(w + st, 0.01) : Math.max(0, rnd(w - st, 0.01));
+  // Wiedereinstieg: etwa 90 %, auf den Schritt abgerundet, mindestens ein Schritt leichter
+  function backLoad(ex, w, st) {
+    if (ex.type === 'assist') return rnd(w + st, 0.01);
+    const v = Math.floor(w * PROG.back / st + 1e-9) * st;
+    return Math.max(0, rnd(v < w ? v : w - st, 0.01));
+  }
+  // Ergebnis: null (aus/nicht möglich) oder { k: 'up'|'down'|'back'|'goal'|'pain'|'pause'|'wait'|'once', … }
+  function progFor(state, exId, sess, item) {
+    const ex = exById(state, exId); if (!progable(ex)) return null;
+    const c = progCfg(state, ex); if (!c.on) return null;
+    const loaded = !!LOADED[ex.type], pk = perfKey(ex);
+    if (pauseFor(state, ex.cat, sess.date)) return { k: 'pause', c };
+    // Beschwerden sperren nur Steigerungen; Wiedereinstieg und Rückschritt (leichter) bleiben möglich
+    const H = progHist(state, ex, sess), all = H.filter(x => x.w);
+    const pain = [...H].reverse().find(x => x.pain);
+    const painUntil = item && item.pain ? addDays(sess.date, PROG.pain) : pain && diffDays(pain.d, sess.date) < PROG.pain ? addDays(pain.d, PROG.pain) : null;
+    if (!all.length) return painUntil ? { k: 'pain', until: painUntil, c } : { k: 'wait', have: 0, n: c.n, c };
+    const last = all[all.length - 1];
+    if (diffDays(last.d, sess.date) > PROG.gap) {
+      return loaded ? { k: 'back', last: last.d, from: last.w.load, w: backLoad(ex, last.w.load, c.step), c }
+        : { k: 'back', last: last.d, hi: pk === 'r' ? Math.max(1, Math.floor(c.hi * PROG.back)) : rnd(c.hi * PROG.back, 1), c };
+    }
+    if (loaded && all.length >= 2) {
+      const [a, b] = all.slice(-2), low = e => e.w.perf.filter(p => p < c.lo).length * 2 >= e.w.perf.length;
+      if (a.w.load === b.w.load && low(a) && low(b)) {
+        let prev = null;
+        for (let i = all.length - 3; i >= 0; i--) if (harder(ex, b.w.load, all[i].w.load)) { prev = all[i].w.load; break; }
+        return { k: 'down', from: b.w.load, w: prev === null ? stepDown(ex, b.w.load, c.step) : prev, c };
+      }
+    }
+    if (painUntil) return { k: 'pain', until: painUntil, c };
+    const D = all.filter(x => !pain || x.d > pain.d);
+    const W = last.w.load;
+    const big = loaded && ex.type !== 'assist' && W > 0 && c.step / W > PROG.cap;
+    const need = big ? (pk === 'r' ? c.hi + PROG.extraR : Math.ceil(c.hi * PROG.extraF)) : c.hi;
+    const ok = e => e.w.perf.length >= PROG.minSets && e.w.perf.every(p => p >= need) && (!loaded || e.w.load === W);
+    let have = 0;
+    for (let i = D.length - 1; i >= 0 && ok(D[i]) && diffDays(D[i].d, last.d) < c.days; i--) have++;
+    const base = { have: Math.min(have, c.n), n: c.n, need, big, W, c };
+    if (have < c.n) return { k: 'wait', ...base };
+    if (loaded) {
+      let inc = null;
+      for (let i = all.length - 1; i > 0; i--) if (harder(ex, all[i].w.load, all[i - 1].w.load)) { inc = all[i].d; break; }
+      if (inc && diffDays(inc, sess.date) < PROG.once) return { k: 'once', until: addDays(inc, PROG.once), ...base };
+      return { k: 'up', from: W, w: stepUp(ex, W, c.step), ...base };
+    }
+    if (c.raised && diffDays(c.raised, sess.date) < PROG.once) return { k: 'once', until: addDays(c.raised, PROG.once), ...base };
+    const st = pk === 'r' ? c.step : Math.min(c.step, Math.max(1, Math.round(c.hi * PROG.cap)));
+    return { k: 'goal', from: c.hi, hi: rnd(c.hi + st, 0.01), lo: rnd(c.lo + st, 0.01), ...base };
+  }
+
   const secTxt = v => v >= 60 && v % 60 === 0 ? v / 60 + ' Min.' : v + ' Sek.';
   function groupRuns(arr) { const out = []; for (const v of arr) { const g = out[out.length - 1]; if (g && g[0] === v) g[1]++; else out.push([v, 1]); } return out; }
   function repsText(r) { r = r.filter(x => x !== null && x !== undefined); if (!r.length) return ''; return r.every(x => x === r[0]) ? `${r.length}×${r[0]}` : r.join('/'); }
@@ -751,7 +939,9 @@ mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
     METRICS, metricValues, exHistory, repRecords,
     MUSCLES, RADAR, EQUIP, EQUIP_OFF, CATALOG, catByKey, low, adopt, adoptedRef, migrateCatalog, matches, parseTime, timeInput, timeTxt,
     trainStats, radarOf, records, weekStreak, sessMin, counted, diffOf, shares,
-    HARD, addMonths, winQuota, passes, bufferInfo, hardStatus, hardBound, diffGate, activeCount, activateBlock, tickHard, hardViolations, migrateHard
+    HARD, addMonths, winQuota, passes, bufferInfo, hardStatus, hardBound, diffGate, activeCount, activateBlock, tickHard, hardViolations, migrateHard,
+    PROG, LOADED, progable, perfKey, PERF_UNIT, stepDefault, progDefaultOn, workSets, progHist, progDerive, progStd, progCfg, settleProg, progFor, backLoad, stepUp, stepDown,
+    VAC_BACK, vacSet, offDays, vacOn, weekOff, vacCheck, winFrom, minEnd, hardFrom
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
 })(typeof self !== 'undefined' ? self : this);
