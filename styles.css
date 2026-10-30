@@ -542,3 +542,22 @@ label.f>span.row .info{margin:-10px 0;width:32px;height:32px}
 .chg .sym{width:34px;height:34px;border-radius:50%;background:var(--s3);display:grid;place-items:center;font-weight:700;flex:none}
 input.cb{width:22px;height:22px;accent-color:var(--accent);flex:none;margin:0}
 .tplrow .tl{background:var(--s3)}
+
+/* 2.10.0: Gewicht kompakt auf „Heute“, Kurs, automatische Zielgewohnheit, Duplikate */
+.wline{display:block;width:100%;text-align:left;border:0;background:var(--s1,var(--s2));border-radius:var(--rs);padding:12px 14px;margin:0 0 12px;color:var(--tx);font:inherit}
+.wl-top{display:flex;align-items:baseline;gap:8px}
+.wl-top b{font-size:var(--f-l,20px)}
+.wl-ago{font-size:var(--f-s)}
+.wl-ago.stale{background:var(--due-bg);color:var(--due-tx);border-radius:999px;padding:3px 10px;font-weight:600}
+.wl-course{display:block;margin-top:4px;font-size:var(--f-s)}
+.good{color:var(--good-c,var(--sage))} .bad{color:var(--danger)}
+.wl-course.faint,.course .faint{color:var(--fa)}
+.chip-b.good{background:var(--good-bg);color:var(--good-tx)}
+.tick.auto{border-style:dashed}
+.tick.auto.on{border-style:solid}
+.tick.auto.few{color:var(--fa);border-color:var(--track,var(--fa))}
+.tick.auto.few b{font-size:20px;line-height:1}
+.dup{gap:6px;flex-wrap:wrap}
+.dup .btn.sm{min-height:44px}
+.card.waist{display:block;color:var(--tx);font:inherit;border:0}
+.card.waist .unit{font-size:var(--f-s);color:var(--mu);font-weight:500}

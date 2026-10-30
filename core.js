@@ -52,6 +52,7 @@
     migrateKfa(s);
     migrateCatalog(s);
     migrateHard(s);
+    migrateGoalAuto(s);
     return s;
   }
   // Alte KFA-Werte (selbst nach Navy gemessen) ab 06.05.2026 als Messungen übernehmen, nur echte Änderungen
@@ -153,6 +154,114 @@
     if (weeks > 520) return { none: true };
     return { date: addDays(today, Math.round(weeks * 7)), weeks };
   }
+  // ---------- Trend und Kurs (ab 2.10.0) ----------
+  // Trend = Mittel ALLER Messungen der letzten 7 Kalendertage (heute eingeschlossen), mindestens 3 Werte.
+  // Tempo = Steigung der linearen Regression über alle Messungen der letzten 28 Tage, mindestens 8 Werte, in kg pro Woche.
+  const TREND = { days: 7, min: 3, paceDays: 28, paceMin: 8, minSession: 10 };
+  const wDay = w => w.t.slice(0, 10);
+  const sortW = weights => (weights || []).filter(w => w && typeof w.kg === 'number' && typeof w.t === 'string').sort((a, b) => a.t.localeCompare(b.t));
+  // Zeitpunkt in Tagen (mit Uhrzeit als Bruchteil), damit mehrere Messungen am Tag nicht übereinander liegen
+  const dayNum = t => diffDays('2000-01-01', t) + ((Number(t.slice(11, 13)) || 0) * 60 + (Number(t.slice(14, 16)) || 0)) / 1440;
+  function inWindow(weights, day, days) {
+    const from = addDays(day, -(days - 1));
+    return sortW(weights).filter(w => wDay(w) >= from && wDay(w) <= day);
+  }
+  function trendAt(weights, day = todayStr()) {
+    const xs = inWindow(weights, day, TREND.days);
+    return { kg: xs.length >= TREND.min ? xs.reduce((a, w) => a + w.kg, 0) / xs.length : null, n: xs.length };
+  }
+  // Trendverlauf für das Diagramm, gleitendes Fenster in einem Durchlauf
+  function trendSeries(weights, from, to) {
+    const ws = sortW(weights), out = []; let i0 = 0, i1 = 0, sum = 0;
+    for (const d of dayRange(from, to)) {
+      while (i1 < ws.length && wDay(ws[i1]) <= d) { sum += ws[i1].kg; i1++; }
+      const lo = addDays(d, -(TREND.days - 1));
+      while (i0 < i1 && wDay(ws[i0]) < lo) { sum -= ws[i0].kg; i0++; }
+      const n = i1 - i0; out.push({ d, kg: n >= TREND.min ? sum / n : null, n });
+    }
+    return out;
+  }
+  function paceAt(weights, day = todayStr()) {
+    const xs = inWindow(weights, day, TREND.paceDays);
+    if (xs.length < TREND.paceMin) return { kgWeek: null, n: xs.length };
+    const pts = xs.map(w => [dayNum(w.t), w.kg]), n = pts.length;
+    const mx = pts.reduce((a, p) => a + p[0], 0) / n, my = pts.reduce((a, p) => a + p[1], 0) / n;
+    let sxy = 0, sxx = 0; for (const [x, y] of pts) { sxy += (x - mx) * (y - my); sxx += (x - mx) ** 2; }
+    return { kgWeek: sxx ? (sxy / sxx) * 7 : null, n };
+  }
+  // Kurs zum Gewichtsziel goal = { kg, deadline }.
+  // status: 'few' (zu wenig Daten) · 'reached' (Trend am Ziel) · 'late' (Stichtag vorbei) · 'on' (auf Kurs) · 'off' (Verzug)
+  function course(weights, goal, day = todayStr()) {
+    const tr = trendAt(weights, day), p = paceAt(weights, day);
+    const out = { trend: tr.kg, nTrend: tr.n, pace: p.kgWeek, nPace: p.n, need: null, weeksLeft: null, delayWeeks: null, reachDate: null };
+    if (!goal || typeof goal.kg !== 'number' || !goal.deadline) return { ...out, status: 'nogoal' };
+    if (tr.kg === null || p.kgWeek === null) return { ...out, status: 'few' };
+    if (tr.kg <= goal.kg) return { ...out, status: 'reached' };
+    const daysLeft = diffDays(day, goal.deadline);
+    if (daysLeft <= 0) return { ...out, status: 'late' };
+    out.weeksLeft = daysLeft / 7;
+    out.need = -(tr.kg - goal.kg) / out.weeksLeft;
+    if (p.kgWeek < 0) {
+      const reachWeeks = (tr.kg - goal.kg) / -p.kgWeek;
+      out.reachDate = addDays(day, Math.round(reachWeeks * 7));
+      out.delayWeeks = reachWeeks - out.weeksLeft;
+    }
+    return { ...out, status: p.kgWeek <= out.need ? 'on' : 'off' };
+  }
+  // Gewichtsziel-Gewohnheit: ab h.autoFrom gilt ein Tag als erfüllt, wenn der Kurs an diesem Tag „auf Kurs“ (oder Ziel erreicht) war;
+  // bei zu wenig Daten ist der Tag neutral (wie ein Urlaubstag). Gespeicherte Häkchen vor autoFrom bleiben unverändert und zählen weiter.
+  const autoGoal = h => !!(h && h.link === 'weightgoal' && h.goal && h.autoFrom);
+  let goalMemo = { k: null, v: null };
+  function goalDays(state, h, today = todayStr()) {
+    const ws = state.weights || [];
+    const k = `${h.id}|${h.autoFrom}|${h.goal.kg}|${h.goal.deadline}|${h.start}|${today}|${ws.length}|${ws.reduce((a, w) => a + (w.kg || 0), 0)}`;
+    if (goalMemo.k === k) return goalMemo.v;
+    const on = new Set(), few = new Set(), from = h.autoFrom > h.start ? h.autoFrom : h.start;
+    const end = today < h.goal.deadline ? today : h.goal.deadline;
+    for (const d of dayRange(from, end)) {
+      const c = course(ws, h.goal, d);
+      if (c.status === 'on' || c.status === 'reached') on.add(d); else if (c.status === 'few') few.add(d);
+    }
+    goalMemo = { k, v: { on, few } };
+    return goalMemo.v;
+  }
+  // Neue Gewichtsziel-Gewohnheiten und bestehende beim ersten Laden: Stichtag für die automatische Wertung setzen (nur ergänzen)
+  function migrateGoalAuto(s, today = todayStr()) {
+    for (const h of s.habits) if (h.link === 'weightgoal' && h.goal && !h.autoFrom) h.autoFrom = today;
+  }
+  // Gleicher Wochentag der Vorwoche: erste Messung heute (bzw. am Tag der letzten Messung) gegen erste Messung 7 Tage davor
+  function weekdayDiff(weights, day = todayStr()) {
+    const daily = dailyFirst(sortW(weights).filter(w => wDay(w) <= day));
+    if (!daily.length) return null;
+    const last = daily[daily.length - 1], prev = daily.find(x => x.d === addDays(last.d, -7));
+    return prev ? { d: last.d, prevD: prev.d, kg: last.kg, prevKg: prev.kg, diff: last.kg - prev.kg } : { d: last.d, kg: last.kg, diff: null };
+  }
+  const lastWeighDay = weights => { const ws = sortW(weights); return ws.length ? wDay(ws[ws.length - 1]) : null; };
+  // Mögliche Duplikate aus der alten App: src "alt", gleiche Uhrzeit (HH:MM) wie der vorherige Eintrag (ebenfalls alt) an einem früheren Tag
+  const wKey = w => `${w.t}|${w.kg}`;
+  function altDuplicates(weights, keep = []) {
+    const ws = sortW(weights), out = [], ks = new Set(keep);
+    for (let i = 1; i < ws.length; i++) {
+      const w = ws[i], p = ws[i - 1];
+      if (w.src === 'alt' && p.src === 'alt' && wDay(w) !== wDay(p) && w.t.slice(11, 16) === p.t.slice(11, 16) && w.t.length >= 16) out.push({ w, prev: p, key: wKey(w), kept: ks.has(wKey(w)) });
+    }
+    return out;
+  }
+  // Körperfett aus der alten App (src "alt") ist geschätzt; ohne alt=true bleiben diese Werte außen vor
+  const isAltFat = m => m && m.src === 'alt';
+  function fatPoints(state, alt = false) {
+    const out = (state.measurements || []).filter(m => typeof m.fat === 'number' && (alt || !isAltFat(m))).map(m => ({ ...m, est: isAltFat(m) }));
+    if (alt) for (const w of state.weights || []) if (w.src === 'alt' && typeof w.fat === 'number' && !out.some(m => m.t.slice(0, 10) === wDay(w))) out.push({ t: w.t, fat: w.fat, src: 'alt', est: true, fromWeight: true });
+    return out.sort((a, b) => a.t.localeCompare(b.t));
+  }
+  // Trainingsdauer: unter 10 Minuten gilt als unbekannt (nachgetragen), über 4 Stunden als Fehler; Start an einem anderen Tag als die Einheit ebenso
+  const sessDur = s => { if (!s.startedAt || !s.endedAt || s.startedAt.slice(0, 10) !== s.date) return null; const m = (new Date(s.endedAt) - new Date(s.startedAt)) / 6e4; return m >= TREND.minSession && m <= 240 ? Math.round(m) : null; };
+  // startedAt nur, wenn die Einheit für heute ist und noch keinen Start hat
+  function markStart(s, now = nowLocal()) {
+    if (!s || s.done || s.startedAt || s.date !== now.slice(0, 10)) return false;
+    s.startedAt = now; return true;
+  }
+
   const navyFat = (height, neck, waist) => {
     if (!height || !neck || !waist || waist <= neck) return null;
     return 495 / (1.0324 - 0.19077 * Math.log10(waist - neck) + 0.15456 * Math.log10(height)) - 450;
@@ -170,7 +279,12 @@
     if (vacMemo.k !== k) { const s = new Set(); for (const v of state.vacations || []) for (const d of dayRange(v.from, v.to)) s.add(d); vacMemo = { k, set: s }; }
     return vacMemo.set;
   }
-  const offDays = (state, h) => h && h.vac === false ? vacSet(state) : NONE;
+  const offDays = (state, h) => {
+    const v = h && h.vac === false ? vacSet(state) : NONE;
+    if (!autoGoal(h)) return v;
+    const few = goalDays(state, h).few;
+    return few.size ? new Set([...v, ...few]) : v;
+  };
   const vacOn = (state, day) => (state.vacations || []).find(v => v.from <= day && v.to >= day) || null;
   // Ganze Woche (Mo–So) frei: nur dann zählt eine „X-mal pro Woche“-Gewohnheit in dieser Woche nicht
   const weekOff = (off, ws) => { if (!off.size) return false; for (let i = 0; i < 7; i++) if (!off.has(addDays(ws, i))) return false; return true; };
@@ -197,7 +311,9 @@
   }
   function checkedDays(state, h) {
     if (h.link === 'sport') return sportDays(state, h.start);
-    return new Set(Object.keys(state.checks[h.id] || {}).filter(d => d >= h.start));
+    const manual = Object.keys(state.checks[h.id] || {}).filter(d => d >= h.start);
+    if (!autoGoal(h)) return new Set(manual);
+    return new Set([...manual.filter(d => d < h.autoFrom), ...goalDays(state, h).on]);
   }
   // Urlaubstage (off) ohne Haken unterbrechen keine Serie und zählen nicht mit
   function streaksDaily(days, start, today, off = NONE) {
@@ -512,7 +628,7 @@ mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
 
   // ---------- Trainingsstatistik ----------
   const counted = s => s.kind === 'training' && (s.done || (s.items && s.items.length));
-  const sessMin = s => { if (!s.startedAt || !s.endedAt) return null; const m = (new Date(s.endedAt) - new Date(s.startedAt)) / 6e4; return m > 0 && m <= 240 ? Math.round(m) : null; };
+  const sessMin = s => sessDur(s);
   const setCount = (ex, it) => ex && ex.type !== 'done' && ex.type !== 'cardio' ? (it.sets || []).filter(x => !x.pre && Object.values(x).some(v => v !== null && v !== undefined && v !== '')).length : 0;
   // Sätze je Muskel: Hauptmuskel zählt ganz, Nebenmuskeln halb
   function trainStats(state, a, b) {
@@ -1020,7 +1136,8 @@ mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
     HARD, addMonths, winQuota, passes, bufferInfo, hardStatus, hardBound, diffGate, activeCount, activateBlock, tickHard, hardViolations, migrateHard,
     PROG, LOADED, progable, perfKey, PERF_UNIT, stepDefault, progDefaultOn, workSets, progHist, progDerive, progStd, progCfg, settleProg, progFor, backLoad, stepUp, stepDown,
     VAC_BACK, vacSet, offDays, vacOn, weekOff, vacCheck, winFrom, minEnd, hardFrom,
-    LETTERS, tplOf, rotTemplates, tplLetter, rotation, tplLast, filled, tplDiff, tplApply, capLimit
+    LETTERS, tplOf, rotTemplates, tplLetter, rotation, tplLast, filled, tplDiff, tplApply, capLimit,
+    TREND, trendAt, trendSeries, paceAt, course, autoGoal, goalDays, migrateGoalAuto, weekdayDiff, lastWeighDay, wKey, altDuplicates, isAltFat, fatPoints, sessDur, markStart
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
 })(typeof self !== 'undefined' ? self : this);
