@@ -145,6 +145,7 @@
     document.body.classList.toggle('paged', !t);
     $app.innerHTML = html;
     if (!t) restoreScroll();
+    document.querySelectorAll('.sheet .chips').forEach(c => { const b = c.querySelector('[aria-pressed=true]'); if (!b) return; const cr = c.getBoundingClientRect(), br = b.getBoundingClientRect(); if (br.right > cr.right) c.scrollLeft += br.left - cr.left - 16; });
     if (ui.pop) { document.querySelectorAll(`[data-arg="${ui.pop}"]`).forEach(el => el.classList.add('pop')); ui.pop = null; }
     const ps = document.getElementById('persist');
     if (ps && navigator.storage && navigator.storage.persisted) navigator.storage.persisted().then(p => { ps.textContent = p ? 'Speicher dauerhaft ✓' : 'Speicher nicht dauerhaft bestätigt · Backups wichtig'; });
@@ -506,7 +507,7 @@
     const startBtn = ts === 'ask' ? '<button class="btn primary block xl" data-act="sheet" data-arg="startTraining">Einheit starten</button>'
       : `<div class="row" style="gap:10px"><button class="btn primary xl grow" data-act="startTraining" data-arg="${ts}:">Einheit starten · ${ts === 'repeat' ? 'wie zuletzt' : 'leer'}</button><button class="iconbtn" style="width:56px;height:56px;flex:none" data-act="sheet" data-arg="startTraining" aria-label="Andere Startmöglichkeiten">${MORE}</button></div>`;
     let out = `<div class="ph"><h1>Training</h1><div class="meta"><span class="pill num">${C.trainings(S).filter(s => s.date.startsWith(y)).length} in ${y}</span></div></div>
-      ${startBtn}
+      ${rotCard() || startBtn}
       <div class="quad" style="margin:10px 0 0"><button class="card tilebtn act" data-act="newMove"><span class="tile-emo" style="--hc:var(--sage)">🚶</span><b>Bewegung</b><span class="faint small">eintragen</span></button>
       <button class="card tilebtn act" data-act="open" data-arg="stats"><span class="tile-emo" style="--hc:#E3B66F">📊</span><b>Statistik</b><span class="faint small num">${MONTHS[Number(d.slice(5, 7)) - 1]}</span></button>
       <button class="card tilebtn act" data-act="open" data-arg="progress"><span class="tile-emo" style="--hc:var(--umber)">📈</span><b>Fortschritt</b><span class="faint small num">${nEx} mit Verlauf</span></button>
@@ -537,17 +538,23 @@
   };
   function screenSession({ id }) {
     const s = S.sessions.find(x => x.id === id); if (!s) return header('Nicht gefunden');
-    let out = header(`Einheit ${s.num}`, s.done ? '' : `<button class="btn sm primary" data-act="finish" data-arg="${s.id}">Fertig</button>`);
+    const t = s.tpl ? C.tplOf(S, s.tpl) : null, title = s.tpl ? `${esc(t ? tplLabel(t) : s.tplName || 'Vorlage')}<span class="faint small num" style="display:block;font-weight:500">Einheit ${s.num}</span>` : `Einheit ${s.num}`;
+    let out = header(title, s.done ? '' : `<button class="btn sm primary" data-act="finish" data-arg="${s.id}">Fertig</button>`);
     out += `<label class="f"><span>Datum</span><input type="date" value="${s.date}" data-change="sessDate" data-arg="${s.id}"></label>`;
     s.items.forEach((it, idx) => { out += exCard(s, it, idx); });
     out += `<button class="btn block" data-act="sheet" data-arg="picker:${s.id}">Übung hinzufügen</button>
       <label class="f" style="margin-top:16px"><span>Notiz zur Einheit</span><textarea data-input="sessNote" data-arg="${s.id}" placeholder="Wie lief es?">${esc(s.note || '')}</textarea></label>
-      ${s.done ? '' : `<button class="btn primary block" data-act="finish" data-arg="${s.id}">Einheit abschließen</button><div style="height:10px"></div>`}
+      ${s.done ? (s.items.length ? `<button class="btn block" data-act="sheet" data-arg="tplSave:${s.id}">Als Vorlage speichern</button><div style="height:10px"></div>` : '') : `<button class="btn primary block" data-act="finish" data-arg="${s.id}">Einheit abschließen</button><div style="height:10px"></div>`}
       <button class="btn danger block" data-act="deleteSession" data-arg="${s.id}">Einheit löschen</button>`;
     return out;
   }
   function exCard(s, it, idx) {
     const ex = C.exById(S, it.ex) || { name: 'Unbekannte Übung', type: 'weight', cat: '' };
+    const run = !s.done, fromTpl = it.ti !== undefined && it.ti !== null;
+    if (it.skip) return `<div class="ex skipped"><div class="row"><span class="grow" style="min-width:0"><b>${esc(ex.name)}</b><span class="faint small" style="display:block">Ausgelassen</span></span><button class="btn sm" data-act="unskipItem" data-arg="${s.id}:${idx}">Rückgängig</button></div></div>`;
+    const ci = C.LOADED[ex.type] ? capInfo(s, it) : null;
+    const lastSets = run ? (C.lastItem(S, it.ex, s.id) || { item: { sets: [] } }).item.sets : [];
+    const ph = (si, k) => { const x = lastSets[si] || lastSets[lastSets.length - 1]; if (!x || x[k] === null || x[k] === undefined || k === 'w') return ''; return k === 's' ? C.timeInput(x[k], ex.unit) : String(x[k]).replace('.', ','); };
     const paused = C.pauseFor(S, ex.cat, s.date);
     const last = C.lastItem(S, it.ex, s.id);
     const lastTxt = last ? `<span class="faint">${dShort(last.session.date).slice(3, 9)}</span> ${esc(C.setSummary(ex, last.item.sets))}${last.item.note ? ' – ' + esc(last.item.note) : ''}` : 'Zum ersten Mal';
@@ -558,18 +565,243 @@
       const timed = ex.type === 'time' || ex.type === 'wtime', mins = timed && ex.unit === 'min';
       const f = (FIELDS[ex.type] || FIELDS.weight).map(([k, l]) => [k, k === 's' && mins ? 'Min.' : l]);
       body = `<div class="sets ${timed ? 'tm' : ''}" style="--cols:${f.length}"><div class="set-head"><span>#</span>${f.map(x => `<span>${x[1]}</span>`).join('')}${timed ? '<span></span>' : ''}<span></span></div>` +
-        it.sets.map((st, si) => `<div class="set"><span class="i">${si + 1}</span>${f.map(([k, l]) => `<input type="text" inputmode="${k === 'incl' ? 'text' : 'decimal'}" aria-label="${l} Satz ${si + 1}" value="${st[k] === null || st[k] === undefined ? '' : k === 's' ? esc(C.timeInput(st[k], ex.unit)) : esc(String(ex.type === 'assist' && k === 'w' ? Math.abs(st[k]) : st[k]).replace('.', ','))}" data-input="set" data-arg="${s.id}:${idx}:${si}:${k}">`).join('')}${timed ? swBtn(`${s.id}:${idx}:${si}:s`) : ''}<button class="x" data-act="delSet" data-arg="${s.id}:${idx}:${si}" aria-label="Satz löschen">×</button></div>`).join('') +
-        `</div><button class="btn sm" data-act="addSet" data-arg="${s.id}:${idx}">+ Satz</button>`;
+        it.sets.map((st, si) => `<div class="set"><span class="i">${si + 1}</span>${f.map(([k, l]) => `<input type="text" inputmode="${k === 'incl' ? 'text' : 'decimal'}" aria-label="${l} Satz ${si + 1}" value="${st[k] === null || st[k] === undefined ? '' : k === 's' ? esc(C.timeInput(st[k], ex.unit)) : esc(String(ex.type === 'assist' && k === 'w' ? Math.abs(st[k]) : st[k]).replace('.', ','))}"${(st[k] === null || st[k] === undefined) && ph(si, k) ? ` placeholder="${esc(ph(si, k))}"` : ''}${ci && k === 'w' && typeof st.w === 'number' && st.w > ci.lim + 1e-9 ? ' class="over"' : ''} data-input="set" data-arg="${s.id}:${idx}:${si}:${k}">`).join('')}${timed ? swBtn(`${s.id}:${idx}:${si}:s`) : ''}<button class="x" data-act="delSet" data-arg="${s.id}:${idx}:${si}" aria-label="Satz löschen">×</button></div>`).join('') +
+        `</div>${capHint(s, idx, ci)}<button class="btn sm" data-act="addSet" data-arg="${s.id}:${idx}">+ Satz</button>`;
     }
-    return `<div class="ex ${paused ? 'paused' : ''}"><div class="row between"><h3>${esc(ex.name)}${ex.uni ? ' <span class="faint small">pro Seite</span>' : ''}</h3>
-      <span>${paused ? '<span class="badge pause">pausiert</span> ' : ''}<span class="badge"><i class="cdot" style="--c:${catCol(ex.cat)}"></i>${esc(ex.cat)}</span></span></div>
-      <p class="last">${lastTxt}</p>${progBanner(s, it, idx, ex)}${body}
+    const badges = `${paused ? '<span class="badge pause">pausiert</span> ' : ''}<span class="badge"><i class="cdot" style="--c:${catCol(ex.cat)}"></i>${esc(ex.cat)}</span>`;
+    const head = run
+      ? `<div class="row" style="align-items:flex-start;gap:6px"><h3 class="grow" style="min-width:0">${esc(ex.name)}${ex.uni ? ' <span class="faint small">pro Seite</span>' : ''}</h3><button class="iconbtn sm" data-act="swapItem" data-arg="${s.id}:${idx}" aria-label="${esc(ex.name)} tauschen">${SWAP}</button>${fromTpl ? `<button class="iconbtn sm" data-act="skipItem" data-arg="${s.id}:${idx}" aria-label="${esc(ex.name)} auslassen">${SKIP}</button>` : ''}</div>
+        <div class="row between" style="gap:8px;align-items:flex-start"><p class="last" style="min-width:0">${lastTxt}</p><span style="flex:none;margin-top:4px">${badges}</span></div>`
+      : `<div class="row between"><h3>${esc(ex.name)}${ex.uni ? ' <span class="faint small">pro Seite</span>' : ''}</h3><span>${badges}</span></div><p class="last">${lastTxt}</p>`;
+    return `<div class="ex ${paused ? 'paused' : ''}">${head}${it.tnote ? `<p class="tnote">${PIN}<span>${esc(it.tnote)}</span></p>` : ''}${progAutoBanner(s, it, idx, ex)}${progBanner(s, it, idx, ex)}${body}
       <input type="text" style="margin-top:10px;min-height:40px;font-size:14px" placeholder="Notiz zur Übung" value="${esc(it.note || '')}" data-input="itemNote" data-arg="${s.id}:${idx}">
       <div class="row" style="justify-content:flex-end;margin-top:8px">${last ? `<button class="btn sm ghost" data-act="open" data-arg="exStats:${it.ex}">Verlauf</button>` : ''}${C.progable(ex) ? `<button class="btn sm ${it.pain ? 'danger' : 'ghost'}" data-act="pain" data-arg="${s.id}:${idx}" aria-pressed="${!!it.pain}">Beschwerden</button>` : ''}<span class="grow"></span><button class="btn sm ghost" data-act="moveItem" data-arg="${s.id}:${idx}:-1" aria-label="Nach oben">↑</button><button class="btn sm ghost" data-act="moveItem" data-arg="${s.id}:${idx}:1" aria-label="Nach unten">↓</button><button class="btn sm danger" data-act="delItem" data-arg="${s.id}:${idx}" aria-label="Übung entfernen">✕</button></div></div>`;
   }
+  // ---------- Vorlagen ----------
+  const SWAP = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>';
+  const SKIP = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h12M12 6l6 6-6 6M20 5v14"/></svg>';
+  const PIN = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6l-1 6 3 3H7l3-3zM12 13v7"/></svg>';
+  const TPLICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="16" rx="3"/><path d="M9 9h6M9 13h6"/></svg>';
+  const WARN = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l9 16H3zM12 10v4M12 17v.5"/></svg>';
+  const MAX_SETS = 10;
+  const tplLabel = t => { const l = C.tplLetter(S, t); return l ? `${l} · ${t.name}` : t.name; };
+  const tplBadge = t => { const l = C.tplLetter(S, t); return `<span class="tl">${l || TPLICON}</span>`; };
+  const nEx = t => `${t.items.length} ${t.items.length === 1 ? 'Übung' : 'Übungen'}`;
+  const nSets = n => `${n} ${n === 1 ? 'Satz' : 'Sätze'}`;
+  const tplCats = t => catNames().filter(c => t.items.some(i => (C.exById(S, i.ex) || {}).cat === c));
+  const catDots = list => list.length ? `<span class="cats">${list.map(c => `<span class="ct"><i style="--c:${catCol(c)}"></i>${esc(c)}</span>`).join('')}</span>` : '';
+  const ck = '<span class="ck">' + CHECK_SM + '</span>';
+  // Rotationskarte im Training-Tab (ersetzt „Einheit starten“, solange es eine Rotation gibt)
+  function rotCard() {
+    const r = C.rotation(S); if (!r) return '';
+    const t = r.next, l = C.tplLetter(S, t), last = C.tplLast(S, t.id);
+    const chips = r.list.map(x => { const xl = esc(C.tplLetter(S, x)); return r.done.has(x.id) ? `<span class="rchip">${xl}${ck}</span>` : x === t ? `<span class="rchip next">${xl} offen</span>` : `<span class="rchip">${xl}</span>`; }).join('');
+    return `<section class="card rot" aria-label="Rotation"><div class="row" style="align-items:flex-start"><div class="grow" style="min-width:0"><div class="lbl">Als Nächstes</div><div class="rot-name">${esc(t.name)}</div><div class="faint small num">${nEx(t)}${last ? ` · zuletzt ${dShort(last).slice(0, 9)}` : ''}</div></div><span class="tl big">${l}</span></div>
+      <div class="rchips"><span class="faint small num">Runde ${r.round}</span>${chips}</div>
+      <button class="btn primary block xl" data-act="startTpl" data-arg="${t.id}:">${l} starten</button>
+      <div class="row" style="gap:10px"><button class="btn ghost grow" data-act="sheet" data-arg="startTraining">Andere oder leer</button><button class="btn ghost grow" data-act="open" data-arg="templates">Vorlagen</button></div></section>`;
+  }
+  // Startmöglichkeiten im Sheet: Rotation, weitere Vorlagen, wie zuletzt, leer
+  function startOptions(date) {
+    const r = C.rotation(S), loose = S.templates.filter(t => !t.archived && !t.rot);
+    if (!r && !loose.length) return `<button class="btn primary block" data-act="startTraining" data-arg="repeat:${date}">Letzte Einheit wiederholen</button>
+      <button class="btn block" data-act="startTraining" data-arg="empty:${date}">Leer starten</button>`;
+    const row = (t, next) => {
+      const last = C.tplLast(S, t.id), right = next ? '<span class="pill nx">Als Nächstes</span>' : r && r.done.has(t.id) ? `<span class="faint small row num" style="gap:4px">${ck}${last ? dShort(last).slice(0, 9) : ''}</span>` : '';
+      return `<button class="tplrow ${next ? 'next' : ''}" data-act="startTpl" data-arg="${t.id}:${date}">${tplBadge(t)}<span class="grow" style="min-width:0"><b>${esc(t.name)}</b><span class="faint small" style="display:block">${nEx(t)}</span></span>${right}</button>`;
+    };
+    let out = '';
+    if (r) out += `<div class="row between lbl-row"><span class="lbl">Rotation</span><span class="faint small num">Runde ${r.round}</span></div>${r.list.map(t => row(t, t === r.next)).join('')}`;
+    if (loose.length) out += `<div class="lbl lbl-row">Weitere Vorlagen</div>${loose.map(t => row(t, false)).join('')}`;
+    return out + `<div class="row" style="gap:10px;margin-top:8px"><button class="btn grow" data-act="startTraining" data-arg="repeat:${date}">Wie zuletzt</button><button class="btn grow" data-act="startTraining" data-arg="empty:${date}">Leer starten</button></div>`;
+  }
+  function screenTemplates() {
+    const act = S.templates.filter(t => !t.archived), rot = act.filter(t => t.rot), loose = act.filter(t => !t.rot), arch = S.templates.filter(t => t.archived);
+    const r = C.rotation(S);
+    const row = t => `<div class="srow tplr">${tplBadge(t)}<button class="grow rowbtn" data-act="open" data-arg="tplEdit:${t.id}"><b>${esc(t.name)}</b><span class="faint small" style="display:block">${nEx(t)}</span>${catDots(tplCats(t))}</button><button class="iconbtn sm" data-act="sheet" data-arg="tplMenu:${t.id}" aria-label="Mehr zu ${esc(t.name)}">${MORE}</button></div>`;
+    let out = header('Vorlagen', `<button class="btn sm primary" data-act="newTpl">+ Neu</button>`);
+    if (rot.length) out += `<div class="row between lbl mon"><span>Rotation · Reihenfolge</span><span class="num">Runde ${r.round}</span></div><div class="wlist">${rot.map(row).join('')}</div>`;
+    if (loose.length) out += `<div class="lbl mon">Weitere Vorlagen</div><div class="wlist">${loose.map(row).join('')}</div>`;
+    if (!act.length) out += `<p class="muted">Noch keine Vorlagen. Lege eine an oder speichere eine abgeschlossene Einheit als Vorlage.</p>`;
+    if (arch.length) out += `<div style="height:16px"></div><button class="btn ghost block" data-act="open" data-arg="tplArchive">Archiviert <span class="badge num">${arch.length}</span> ›</button>`;
+    return out;
+  }
+  function screenTplArchive() {
+    const arch = S.templates.filter(t => t.archived);
+    let out = header('Archivierte Vorlagen');
+    if (!arch.length) return out + '<p class="muted">Keine archivierten Vorlagen.</p>';
+    return out + `<div class="wlist">${arch.map(t => `<div class="srow tplr">${tplBadge(t)}<span class="grow"><b>${esc(t.name)}</b><span class="faint small" style="display:block">${nEx(t)}</span></span><button class="iconbtn sm" data-act="sheet" data-arg="tplMenu:${t.id}" aria-label="Mehr zu ${esc(t.name)}">${MORE}</button></div>`).join('')}</div>`;
+  }
+  function screenTplEdit({ id }) {
+    const t = id ? C.tplOf(S, id) : null;
+    if (id && !t) return header('Nicht gefunden');
+    if (!ui.tplDraft || ui.tplDraft.key !== (id || 'new')) ui.tplDraft = { key: id || 'new', name: t ? t.name : '', rot: t ? !!t.rot : !t, items: t ? t.items.map(x => ({ ...x })) : [] };
+    const d = ui.tplDraft, rl = C.rotTemplates(S), inRot = t && t.rot && !t.archived, pos = inRot ? rl.indexOf(t) : rl.length, total = inRot ? rl.length : rl.length + 1;
+    let out = header(t ? 'Vorlage' : 'Neue Vorlage', `<button class="btn sm primary" data-act="tplSave" data-arg="${id || ''}">Speichern</button>`);
+    out += `<label class="f"><span>Name</span><input type="text" value="${esc(d.name)}" data-input="tplName" placeholder="z. B. Oberkörper Zug" maxlength="40"></label>
+      <label class="card row" style="cursor:pointer;padding:12px 16px"><span class="grow"><b>In Rotation</b><span class="faint small num" style="display:block">${d.rot ? `Position ${C.LETTERS[pos] || '?'} von ${total}` : 'nur einzeln startbar'}</span></span><input type="checkbox" class="sw" data-change="tplRot" ${d.rot ? 'checked' : ''} aria-label="In Rotation"></label>
+      <div class="row between lbl mon" style="align-items:center"><span class="num">Übungen · ${d.items.length}</span>${infoBtn('tpl')}</div>`;
+    d.items.forEach((it, i) => {
+      const ex = C.exById(S, it.ex) || { name: 'Unbekannte Übung', cat: '', type: 'weight' };
+      const stepper = ex.type === 'done' ? '<span class="stepper muted small" style="padding:0 16px">erledigt</span>'
+        : `<div class="stepper"><button data-act="tplSets" data-arg="${i}:-1" aria-label="Ein Satz weniger" ${it.sets <= 1 ? 'disabled' : ''}>−</button><span class="num"><b>${it.sets}</b> <span class="faint small">${it.sets === 1 ? 'Satz' : 'Sätze'}</span></span><button data-act="tplSets" data-arg="${i}:1" aria-label="Ein Satz mehr" ${it.sets >= MAX_SETS ? 'disabled' : ''}>+</button></div>`;
+      out += `<div class="ex tpl-it"><div class="row" style="gap:6px"><span class="tn num">${i + 1}</span><span class="grow" style="min-width:0"><b>${esc(ex.name)}</b><span class="faint small" style="display:block"><i class="cdot" style="--c:${catCol(ex.cat)}"></i>${esc(ex.cat)}</span></span>
+        <button class="iconbtn sm" data-act="tplItMove" data-arg="${i}:-1" aria-label="Nach oben" ${i === 0 ? 'disabled' : ''}>↑</button><button class="iconbtn sm" data-act="tplItMove" data-arg="${i}:1" aria-label="Nach unten" ${i === d.items.length - 1 ? 'disabled' : ''}>↓</button><button class="iconbtn sm del" data-act="tplItDel" data-arg="${i}" aria-label="Entfernen">✕</button></div>
+        <div class="row" style="gap:10px;margin-top:10px">${stepper}<input type="text" class="grow tnote-in" value="${esc(it.note || '')}" placeholder="Notiz" data-input="tplNote" data-arg="${i}" aria-label="Notiz zur Übung" maxlength="80"></div></div>`;
+    });
+    out += `<button class="btn block" data-act="sheet" data-arg="picker:tpl">Übung hinzufügen</button>`;
+    if (t) out += `<div class="row" style="gap:10px;margin-top:10px"><button class="btn ghost grow" data-act="tplDup" data-arg="${t.id}">Duplizieren</button><button class="btn ghost grow" data-act="tplArchive" data-arg="${t.id}">${t.archived ? 'Wiederherstellen' : 'Archivieren'}</button></div>`;
+    return out;
+  }
+  // Vorbefüllen aus der Vorlage: Gewicht aus dem Progressionsvorschlag, sonst aus der letzten Einheit; alles andere bleibt leer.
+  // Unberührte Sätze tragen pre und fallen beim Abschluss weg.
+  function prefill(s, it, n) {
+    const ex = C.exById(S, it.ex);
+    delete it.progOk; delete it.progNo; delete it.progAuto;
+    if (!ex || ex.type === 'done') { it.sets = []; return; }
+    let w = null;
+    if (C.LOADED[ex.type]) {
+      const sign = ex.type === 'assist' ? -1 : 1, p = C.progFor(S, it.ex, s, it), l = C.lastItem(S, it.ex, s.id), ws = l ? C.workSets(ex, l.item.sets) : null;
+      if (p && p.w !== undefined && ['up', 'down', 'back'].includes(p.k)) { w = sign * p.w; it.progAuto = { k: p.k, from: p.from, w: p.w }; it.progOk = p.k; }
+      else if (ws && ws.load !== null) w = sign * ws.load;
+    }
+    it.sets = Array.from({ length: Math.max(1, n) }, () => (w !== null ? { w, pre: 1 } : { pre: 1 }));
+  }
+  // Beim Abschluss: unberührte vorbefüllte Sätze entfernen; Übungen, die dadurch leer werden, gelten als ausgelassen
+  function cleanSession(s) {
+    for (const it of s.items) {
+      if (!it.sets || !it.sets.some(x => x.pre)) continue;
+      it.sets = it.sets.filter(x => !x.pre);
+      const ex = C.exById(S, it.ex);
+      if (!it.sets.length && it.ti !== undefined && it.ti !== null && ex && ex.type !== 'done') it.skip = true;
+    }
+  }
+  // Hinweis auf zu großen Sprung (10-%-Grenze)
+  function capInfo(s, it) {
+    if (s.done) return null;
+    const lim = C.capLimit(S, it.ex, s); if (lim === null) return null;
+    return { lim, over: it.sets.some(x => typeof x.w === 'number' && x.w > lim + 1e-9) };
+  }
+  const capHint = (s, idx, ci) => ci ? `<div class="caphint" id="cap-${s.id}-${idx}" ${ci.over ? '' : 'hidden'}>${WARN}<span class="grow">Über 10-%-Grenze · max. <b class="num">${C.fmtW(ci.lim)} kg</b></span></div>` : '';
+  function changeText(c) {
+    const nm = id => esc((C.exById(S, id) || {}).name || 'Übung');
+    if (c.k === 'swap') return [`${nm(c.ex)} statt ${nm(c.old)}`, 'getauscht'];
+    if (c.k === 'skip') return [`${nm(c.ex)} entfernen`, 'ausgelassen'];
+    if (c.k === 'add') return [`${nm(c.ex)} ergänzen`, `hinzugefügt · ${nSets(c.n)}`];
+    if (c.k === 'sets') return [`${nm(c.ex)}: ${nSets(c.n)}`, `bisher ${c.old}`];
+    return ['Reihenfolge wie heute', 'umgestellt'];
+  }
+  const CHG_SYM = { swap: '⇄', skip: '−', add: '+', sets: '#', order: '↕' };
+  const TPL_SHEETS = {
+    tplMenu: ({ sid }) => {
+      const t = C.tplOf(S, sid); if (!t) return '<h3>Nicht gefunden</h3><button class="btn ghost block" data-act="closeSheet">Schließen</button>';
+      const rl = C.rotTemplates(S), i = rl.indexOf(t), b = (act, l, cls = '', arg = t.id) => `<button class="btn block ${cls}" data-act="${act}" data-arg="${arg}">${l}</button>`;
+      const main = t.archived ? b('tplArchive', 'Wiederherstellen')
+        : b('tplDup', 'Duplizieren') + b('tplRot', t.rot ? 'Aus Rotation nehmen' : 'In Rotation aufnehmen')
+          + (t.rot && i > 0 ? b('tplMove', 'Früher in der Rotation', '', `${t.id}:-1`) : '') + (t.rot && i < rl.length - 1 ? b('tplMove', 'Später in der Rotation', '', `${t.id}:1`) : '') + b('tplArchive', 'Archivieren');
+      return `<h3>${esc(tplLabel(t))}</h3>${b('tplOpen', 'Bearbeiten')}${main}${b('tplDelete', 'Löschen', 'danger')}<button class="btn ghost block" data-act="closeSheet">Schließen</button>`;
+    },
+    tplAdjust: ({ sid }) => {
+      const s = S.sessions.find(x => x.id === sid), t = s && C.tplOf(S, s.tpl), L = ui.tplDiffs && ui.tplDiffs.sid === sid ? ui.tplDiffs.list : [];
+      if (!s || !t) return `<h3>Gespeichert</h3><button class="btn block" data-act="tplKeep" data-arg="${sid}">OK</button>`;
+      const l = C.tplLetter(S, t);
+      return `<span class="pill ok">${ck}Einheit ${s.num} gespeichert</span><h3 style="margin:12px 0 2px">${l ? `Vorlage ${l}` : `„${esc(t.name)}“`} anpassen?</h3><p class="faint small num" style="margin:0 0 12px">${L.length} ${L.length === 1 ? 'Abweichung' : 'Abweichungen'}</p>
+        <div class="wlist" style="margin:0 0 14px">${L.map((c, i) => { const [a, b] = changeText(c); return `<label class="srow chg"><span class="sym" aria-hidden="true">${CHG_SYM[c.k]}</span><span class="grow" style="min-width:0"><b>${a}</b><span class="faint small" style="display:block">${b}</span></span><input type="checkbox" class="cb" id="chg${i}" ${c.on ? 'checked' : ''}></label>`; }).join('')}</div>
+        <button class="btn primary block" data-act="tplApply" data-arg="${sid}">Auswahl in Vorlage übernehmen</button><button class="btn ghost block" data-act="tplKeep" data-arg="${sid}">Vorlage lassen, wie sie ist</button>`;
+    },
+    tplSave: ({ sid }) => {
+      const s = S.sessions.find(x => x.id === sid); if (!s) return '';
+      const items = s.items.filter(it => C.exById(S, it.ex)), rl = C.rotTemplates(S), nl = C.LETTERS[rl.length] || '';
+      return `<h3 style="margin-bottom:2px">Als Vorlage speichern</h3><p class="faint small num" style="margin:0 0 14px">Aus Einheit ${s.num} · ${dShort(s.date).slice(0, 9)}</p>
+        <label class="f"><span>Name</span><input type="text" id="tsName" placeholder="z. B. Ganzkörper kurz" maxlength="40"></label>
+        <div class="wlist" style="margin:0 0 14px">${items.map(it => { const ex = C.exById(S, it.ex); return `<div class="r"><span style="min-width:0"><i class="cdot" style="--c:${catCol(ex.cat)}"></i>${esc(ex.name)}</span><span class="faint small num" style="flex:none;margin-left:10px">${ex.type === 'done' ? 'erledigt' : nSets(setsOf(it))}</span></div>`; }).join('')}</div>
+        <label class="row between" style="cursor:pointer;margin:0 4px 16px"><span><b>In Rotation aufnehmen</b><span class="faint small" style="display:block">als ${nl}${rl.length ? `, nach ${C.LETTERS[rl.length - 1]}` : ''}</span></span><input type="checkbox" class="sw" id="tsRot" aria-label="In Rotation aufnehmen"></label>
+        <button class="btn primary block" data-act="tplFromSession" data-arg="${sid}">Vorlage speichern</button><button class="btn ghost block" data-act="closeSheet">Abbrechen</button>`;
+    }
+  };
+  const setsOf = it => Math.min(MAX_SETS, Math.max(1, (it.sets || []).filter(C.filled).length));
+  // Nach Änderungen im Menü: Sheet schließen, sonst neu zeichnen
+  const tplDone = () => { if (ui.sheet) closeSheet(); else render(); };
+  const TPL_ACTIONS = {
+    startTpl: a => { const [id, date] = a.split(':'); newSession('tpl', date || today(), id); },
+    newTpl: () => { ui.tplDraft = null; push('tplEdit', { id: null }); },
+    tplOpen: a => { ui.tplDraft = null; push('tplEdit', { id: a }); },
+    tplSave: a => {
+      const d = ui.tplDraft; if (!d) return;
+      const name = d.name.trim(); if (!name) return toast('Gib der Vorlage einen Namen.');
+      if (!d.items.length) return toast('Füge mindestens eine Übung hinzu.');
+      const t = a ? C.tplOf(S, a) : { id: uid('t'), archived: false, created: today() };
+      if (!t) return;
+      t.name = name; t.rot = d.rot; t.items = d.items.map(x => ({ ex: x.ex, sets: x.sets, note: (x.note || '').trim() }));
+      if (!a) S.templates.push(t);
+      ui.tplDraft = null; save(); pop(); toast('Vorlage gespeichert');
+    },
+    tplItMove: a => { const d = ui.tplDraft; if (!d) return; const [i, dir] = a.split(':').map(Number), j = i + dir; if (j < 0 || j >= d.items.length) return; [d.items[i], d.items[j]] = [d.items[j], d.items[i]]; render(); },
+    tplItDel: a => { const d = ui.tplDraft; if (!d) return; d.items.splice(Number(a), 1); render(); },
+    tplSets: a => { const d = ui.tplDraft; if (!d) return; const [i, dir] = a.split(':').map(Number), it = d.items[i]; if (!it) return; it.sets = Math.max(1, Math.min(MAX_SETS, it.sets + dir)); render(); },
+    tplDup: a => {
+      const t = C.tplOf(S, a); if (!t) return;
+      const c = { id: uid('t'), name: `${t.name} (Kopie)`.slice(0, 40), rot: false, archived: false, created: today(), items: t.items.map(x => ({ ...x })) };
+      S.templates.splice(S.templates.indexOf(t) + 1, 0, c); save(); tplDone(); toast(`„${c.name}“ angelegt`);
+    },
+    tplRot: a => { const t = C.tplOf(S, a); if (!t) return; t.rot = !t.rot; save(); tplDone(); toast(t.rot ? 'In die Rotation aufgenommen' : 'Aus der Rotation genommen'); },
+    tplMove: a => {
+      const [id, dir] = a.split(':'), rl = C.rotTemplates(S), t = C.tplOf(S, id), i = rl.indexOf(t), o = rl[i + Number(dir)];
+      if (!t || !o) return;
+      const x = S.templates.indexOf(t), y = S.templates.indexOf(o); [S.templates[x], S.templates[y]] = [S.templates[y], S.templates[x]];
+      save(); tplDone();
+    },
+    tplArchive: a => {
+      const t = C.tplOf(S, a); if (!t) return;
+      t.archived = !t.archived; if (t.archived) t.rot = false;
+      save(); toast(t.archived ? 'Archiviert' : 'Wiederhergestellt');
+      if (ui.sheet) closeSheet(); else { ui.tplDraft = null; pop(); }
+    },
+    tplDelete: a => {
+      const t = C.tplOf(S, a); if (!t || !confirm(`Vorlage „${t.name}“ löschen? Bisherige Einheiten bleiben erhalten.`)) return;
+      S.templates = S.templates.filter(x => x !== t); save(); closeSheet();
+    },
+    swapItem: a => {
+      const [sid, idx] = a.split(':'), s = S.sessions.find(x => x.id === sid), it = s && s.items[Number(idx)]; if (!it) return;
+      const ex = C.exById(S, it.ex) || {};
+      ui.f.pick = { q: '', eq: '', mu: ex.muscle && C.MUSCLES[ex.muscle] ? ex.muscle : '', sid, swap: Number(idx) };
+      openSheet({ name: 'picker', sid });
+    },
+    skipItem: a => { const { it } = findSet(a + ':0:x'); if (!it) return; if (ui.sw) stopSw(); it.skipSets = it.sets; it.sets = []; it.skip = true; save(); render(); },
+    unskipItem: a => { const { it } = findSet(a + ':0:x'); if (!it) return; it.sets = it.skipSets || []; delete it.skipSets; delete it.skip; save(); render(); },
+    progUndo: a => {
+      const { it } = findSet(a + ':0:x'); if (!it || !it.progAuto) return;
+      const ex = C.exById(S, it.ex), sign = ex && ex.type === 'assist' ? -1 : 1, sug = it.progAuto.w !== undefined ? sign * it.progAuto.w : (it.sets.find(x => typeof x.w === 'number') || {}).w;
+      for (const x of it.sets) if (x.w === sug) x.w = sign * it.progAuto.from;
+      delete it.progAuto; delete it.progOk; it.progNo = true; save(); render();
+    },
+    tplApply: a => {
+      const s = S.sessions.find(x => x.id === a), L = ui.tplDiffs && ui.tplDiffs.sid === a ? ui.tplDiffs.list : [];
+      const sel = L.filter((c, i) => { const el = document.getElementById('chg' + i); return el && el.checked; });
+      if (s && sel.length) C.tplApply(S, s, sel);
+      ui.tplDiffs = null; ui.sheet = null; save(); history.go(-2);
+      toast(sel.length ? 'Vorlage angepasst' : 'Vorlage unverändert');
+    },
+    tplKeep: () => { ui.tplDiffs = null; ui.sheet = null; history.go(-2); },
+    tplFromSession: a => {
+      const s = S.sessions.find(x => x.id === a); if (!s) return;
+      const name = document.getElementById('tsName').value.trim(); if (!name) return toast('Gib der Vorlage einen Namen.');
+      const items = s.items.filter(it => C.exById(S, it.ex)).map(it => ({ ex: it.ex, sets: setsOf(it), note: '' }));
+      if (!items.length) return toast('Diese Einheit enthält keine Übungen.');
+      S.templates.push({ id: uid('t'), name, rot: document.getElementById('tsRot').checked, archived: false, created: today(), items });
+      save(); closeSheet(); toast('Vorlage gespeichert');
+    },
+    sTpl: a => { ui.sTpl = a; render(); }
+  };
   // ---------- Progression ----------
   const fmtPerf = (ex, v) => { const k = C.perfKey(ex); return k === 's' ? C.timeTxt(v, ex.unit) : `${C.fmtW(v)} ${C.PERF_UNIT[k]}`; };
   const fmtLoad = (ex, v) => ex.type === 'assist' ? (v === 0 ? 'ohne Hilfe' : `${C.fmtW(v)} kg Hilfe`) : `${C.fmtW(v)} kg`;
+  function progAutoBanner(s, it, idx, ex) {
+    const p = it.progAuto; if (s.done || !p) return '';
+    const cur = p.w !== undefined ? p.w : (it.sets.find(x => typeof x.w === 'number') || {}).w; if (cur === undefined) return '';
+    const arrow = p.k === 'up' ? '↑' : p.k === 'down' ? '↓' : 'Wiedereinstieg', unit = ex.type === 'assist' ? ' kg Hilfe' : ' kg';
+    return `<div class="prog ${p.k === 'up' ? '' : 'warn'}"><span class="grow">${arrow} <b class="num">${fmtLoad(ex, Math.abs(cur))}</b> vorgeschlagen<span class="faint num"> statt ${C.fmtW(p.from)}</span></span><button class="btn sm ghost" data-act="progUndo" data-arg="${s.id}:${idx}">${C.fmtW(p.from)}${unit} behalten</button></div>`;
+  }
   function progBanner(s, it, idx, ex) {
     if (s.done || it.progNo || it.progOk) return '';
     const p = C.progFor(S, it.ex, s, it); if (!p) return '';
@@ -858,16 +1090,25 @@
     const max = Math.max(...keys.map(k => st.muscles[k]));
     return `<div class="mbars">${keys.sort((a, b) => st.muscles[b] - st.muscles[a]).map(k => `<div class="mbar"><span>${C.MUSCLES[k]}</span><i><b style="width:${(100 * st.muscles[k] / max).toFixed(1)}%"></b></i><em class="num">${C.fmtW(Math.round(st.muscles[k] / wk * 10) / 10)}</em></div>`).join('')}</div>`;
   }
+  // Statistik nach Vorlage: B = Einheiten aus Vorlage B; Weitere = alle Einheiten außerhalb der Rotation
+  function statsState() {
+    const f = ui.sTpl; if (!f) return S;
+    const rot = new Set(C.rotTemplates(S).map(t => t.id));
+    return { ...S, sessions: S.sessions.filter(x => x.kind === 'training' && (f === 'other' ? !rot.has(x.tpl) : x.tpl === f)) };
+  }
   function screenStats() {
-    const d = today(), r = ui.sRange, ts = C.trainings(S).filter(C.counted);
+    const rl = C.rotTemplates(S);
+    if (ui.sTpl && ui.sTpl !== 'other' && !rl.some(t => t.id === ui.sTpl)) ui.sTpl = '';
+    const SF = statsState(), d = today(), r = ui.sRange, ts = C.trainings(SF).filter(C.counted);
     const first = ts.length ? ts[0].date : d, days = SR[r] || C.diffDays(first, d) + 1;
     const a = SR[r] ? C.addDays(d, -(days - 1)) : first, pa = C.addDays(a, -days), pb = C.addDays(a, -1);
-    const st = C.trainStats(S, a, d), pv = SR[r] ? C.trainStats(S, pa, pb) : null;
+    const st = C.trainStats(SF, a, d), pv = SR[r] ? C.trainStats(SF, pa, pb) : null;
     const best = [...st.ex.entries()].sort((x, y) => y[1].n - x[1].n || y[1].last.localeCompare(x[1].last)).slice(0, 8);
-    const recs = C.records(S).filter(x => x.d >= a && x.d <= d).slice(0, 10);
+    const recs = C.records(SF).filter(x => x.d >= a && x.d <= d).slice(0, 10);
     const ym = d.slice(0, 7);
     let out = header('Statistik', infoBtn('tstats')) + `<button class="srow card-row" data-act="open" data-arg="month:${ym}"><span class="sn">📅</span><span class="grow"><b>Monatsbericht</b><span class="faint small" style="display:block">${MONTHS[Number(ym.slice(5)) - 1]} ${ym.slice(0, 4)}</span></span><span class="chev">›</span></button>
       <div class="seg wide rng" style="margin:14px 0 10px">${Object.keys(SR).map(k => `<button aria-pressed="${k === r}" data-act="sRange" data-arg="${k}">${k}</button>`).join('')}</div>
+      ${rl.length ? `<div class="chips" role="group" aria-label="Vorlage" style="margin:0 0 10px">${[['', 'Alle', 'Alle Einheiten'], ...rl.map(t => [t.id, C.tplLetter(S, t), tplLabel(t)]), ['other', 'Weitere', 'Weitere Einheiten']].map(([k, l, al]) => `<button class="chip" aria-pressed="${(ui.sTpl || '') === k}" data-act="sTpl" data-arg="${k}" aria-label="${esc(al)}">${esc(l)}</button>`).join('')}</div>` : ''}
       ${mtiles(st, pv)}
       <h2>Muskelverteilung</h2>${radar(C.radarOf(st.muscles), pv ? C.radarOf(pv.muscles) : null)}
       <h2>Sätze pro Woche je Muskel</h2>${muscleBars(st, days)}
@@ -1107,7 +1348,7 @@
       <div class="opt"><label class="lbl" for="wLines">Markierungen in kg</label><input type="text" id="wLines" inputmode="decimal" value="${weightLines().map(C.fmtW).join(' ')}" data-change="weightLines" placeholder="z. B. 99 92 88"></div>
       <div class="opt"><label class="lbl" for="hCm">Körpergröße in cm</label><input type="text" id="hCm" inputmode="decimal" value="${S.settings.heightCm || ''}" data-change="height" placeholder="cm"></div></div>
       <p class="faint small" id="persist" style="margin:18px 0 4px">…</p>
-      <p class="faint small" style="margin:0">Dein Leben 2.8.0</p>`;
+      <p class="faint small" style="margin:0">Dein Leben 2.9.0</p>`;
   }
   const DEFAULTS = { dotShape: 'bar', dotLabel: 'none', heuteView: 'tiles', trainStart: 'ask', weightRange: 'auto', backupDays: 7 };
   const iconOf = k => `<span class="sn"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg></span>`;
@@ -1275,7 +1516,7 @@
   function logGoal(year, action, title, reason) { S.goalLog.push({ t: C.nowLocal(), year: String(year), action, title, reason: reason || '' }); }
 
   const TABS = { heute: viewHeute, ziele: viewZiele, training: viewTraining, gewicht: viewGewicht, mehr: viewMehr };
-  const SCREENS = { vacations: screenVacations, stats: screenStats, month: screenMonth, equip: screenEquip, tabOrder: screenTabOrder, ring: screenRing, cats: screenCats, catEdit: screenCatEdit, habit: screenHabit, habitEdit: screenHabitEdit, session: screenSession, move: screenMove, exercises: screenExercises, exEdit: screenExEdit, pauses: screenPauses, weights: screenWeights, measure: screenMeasure, heuteLook: screenHeuteLook, body: screenBody, wstats: screenWStats, habits: screenHabits, goalEdit: screenGoalEdit, progress: screenProgress, exStats: screenExStats };
+  const SCREENS = { templates: screenTemplates, tplEdit: screenTplEdit, tplArchive: screenTplArchive, vacations: screenVacations, stats: screenStats, month: screenMonth, equip: screenEquip, tabOrder: screenTabOrder, ring: screenRing, cats: screenCats, catEdit: screenCatEdit, habit: screenHabit, habitEdit: screenHabitEdit, session: screenSession, move: screenMove, exercises: screenExercises, exEdit: screenExEdit, pauses: screenPauses, weights: screenWeights, measure: screenMeasure, heuteLook: screenHeuteLook, body: screenBody, wstats: screenWStats, habits: screenHabits, goalEdit: screenGoalEdit, progress: screenProgress, exStats: screenExStats };
 
   // ---------- Sheets ----------
   const INFOS = {
@@ -1313,6 +1554,10 @@
       <p><b>Bewährung:</b> danach 2 Monate „schwer“, wieder mindestens 98 %. Bis dahin keine weitere schwere oder sehr schwere Gewohnheit.</p>
       <p><b>Puffer:</b> so viele Fehltage (bei „X-mal pro Woche“: verpasste Einheiten) erlaubt die 98-%-Grenze noch. Verfehlt? Das Fenster rollt weiter, ein Ausrutscher verschiebt den Termin, statt alles zurückzusetzen.</p>
       <p><b>Bedenkzeit:</b> Eine neue sehr schwere beginnt frühestens morgen; bis dahin lässt sie sich zurücknehmen. Archivieren geht später, die Sperre bleibt dann 6 Monate ab Beginn.</p>`],
+    tpl: ['Vorlagen', () => `<p><b>Vorlage:</b> Übungen, Reihenfolge, Satzzahl und Notizen. Gewicht und Wiederholungen kommen aus deinen Daten: Beim Start ist das vorgeschlagene Gewicht eingetragen, sonst das der letzten Einheit.</p>
+      <p><b>Rotation:</b> Eine Runde ist fertig, wenn jede Vorlage der Rotation einmal trainiert wurde. Vorgeschlagen wird die erste noch offene, Ausgelassenes bleibt als Nächstes stehen.</p>
+      <p><b>Großer Sprung:</b> Liegt ein Gewicht mehr als 10 % über dem letzten Arbeitsgewicht, erscheint ein Hinweis. Ein Schritt ist immer frei.</p>
+      <p><b>Nach dem Training</b> fragt die App nur bei Abweichungen, ob die Vorlage angepasst werden soll. Unausgefüllte Sätze fallen weg. Alte Einheiten ändern sich nie.</p>`],
     tstats: ['Trainingsstatistik', () => `<p><b>Vergleich:</b> der gleich lange Zeitraum direkt davor.</p>
       <p><b>Sätze:</b> Sätze mit mindestens einem Wert. Hauptmuskel zählt ganz, Nebenmuskeln halb. Ausdauer und Mobilität zählen nicht.</p>
       <p><b>Dauer:</b> nur Einheiten, die in der App gestartet und mit „Fertig“ beendet wurden, höchstens 4 Stunden je Einheit. Importierte Einheiten haben keine Uhrzeit.</p>
@@ -1346,18 +1591,21 @@
         <p><b>Einträge löschen:</b> unter „Alle Einträge“.</p></div>
         <button class="btn block" data-act="closeSheet">Verstanden</button>`;
     },
-    sport: ({ date }) => `<h3>Sport am ${dNum(date)}</h3>
-      <button class="btn primary block" data-act="startTraining" data-arg="repeat:${date}">Letzte Einheit wiederholen</button>
-      <button class="btn block" data-act="startTraining" data-arg="empty:${date}">Leer starten</button>
+    sport: ({ date }) => `<h3>Sport am ${dNum(date)}</h3>${startOptions(date)}
       <button class="btn block" data-act="newMove" data-arg="${date}">Bewegung eintragen</button>
       <button class="btn ghost block" data-act="closeSheet">Abbrechen</button>`,
-    startTraining: () => SHEETS.sport({ date: today() }).replace(/<h3>.*<\/h3>/, '<h3>Einheit starten</h3>'),
+    startTraining: () => `<h3>Einheit starten</h3>${startOptions(today())}
+      <button class="btn ghost block" data-act="open" data-arg="templates">Vorlagen${S.templates.some(t => !t.archived) ? ' verwalten' : ' anlegen'}</button>
+      <button class="btn ghost block" data-act="closeSheet">Abbrechen</button>`,
     picker: ({ sid }) => {
       ui.f.pick.sid = sid;
-      return `<h3>Übung hinzufügen</h3>${filterBar('pick')}<div id="exl-pick">${exListBody('pick')}</div>
-        <div style="height:12px"></div><button class="btn block" data-act="open" data-arg="exEdit::${sid}">Eigene Übung anlegen</button><button class="btn ghost block" data-act="closeSheet">Schließen</button>`;
+      const sw = ui.f.pick.swap, s = sw !== undefined ? S.sessions.find(x => x.id === sid) : null, old = s && s.items[sw] ? C.exById(S, s.items[sw].ex) : null;
+      const title = old ? `<h3 style="margin-bottom:2px">Tauschen</h3><p class="faint small" style="margin:0 0 12px">Ersatz für ${esc(old.name)}</p>` : '<h3>Übung hinzufügen</h3>';
+      return `${title}${filterBar('pick')}<div id="exl-pick">${exListBody('pick')}</div>
+        <div style="height:12px"></div>${sid === 'tpl' || old ? '' : `<button class="btn block" data-act="open" data-arg="exEdit::${sid}">Eigene Übung anlegen</button>`}<button class="btn ghost block" data-act="closeSheet">Schließen</button>`;
     }
   };
+  Object.assign(SHEETS, TPL_SHEETS);
 
   // ---------- Gewohnheit speichern (mit festen Regeln) ----------
   function readHabitForm(a) {
@@ -1429,9 +1677,14 @@
     save(); render();
   }
   function cloneSets(sets) { return sets.map(x => ({ ...x })); }
-  function newSession(mode, date) {
+  function newSession(mode, date, tplId) {
     const year = date.slice(0, 4);
     const s = { id: uid('s'), kind: 'training', date, num: C.nextNum(S, year), items: [], note: '', done: false, startedAt: C.nowLocal() };
+    if (mode === 'tpl') {
+      const t = C.tplOf(S, tplId); if (!t) return toast('Vorlage nicht gefunden.');
+      s.tpl = t.id; s.tplName = tplLabel(t); s.tplItems = JSON.parse(JSON.stringify(t.items));
+      t.items.forEach((ti, i) => { if (!C.exById(S, ti.ex)) return; const it = { ex: ti.ex, ti: i, sets: [], note: '', done: false }; if (ti.note) it.tnote = ti.note; prefill(s, it, ti.sets); s.items.push(it); });
+    }
     if (mode === 'repeat') {
       const prev = C.trainings(S).filter(x => x.date <= date).pop();
       if (prev) s.items = prev.items.map(i => { const l = C.lastItem(S, i.ex); return { ex: i.ex, sets: l ? cloneSets(l.item.sets) : [], note: '', done: false }; });
@@ -1489,6 +1742,7 @@
       else if (n === 'goalEdit') { const [id, y] = v.split(':'); push('goalEdit', { id: id || null, year: y || null }); }
       else if (n === 'exEdit') { const [id, sid] = v.split(':'); push('exEdit', { id: id || null, sessionId: sid || null }); }
       else if (n === 'exStats') push('exStats', { id: v });
+      else if (n === 'tplEdit') { ui.tplDraft = null; push('tplEdit', { id: v || null }); }
       else if (n === 'month') push('month', { ym: v || today().slice(0, 7) });
       else if (n === 'catEdit') { ui.draftColor = null; push('catEdit', { idx: v === '' ? null : Number(v) }); }
       else push(n); },
@@ -1519,12 +1773,31 @@
     deleteHabit: a => { const hd = S.habits.find(x => x.id === a); if (hd && C.hardBound(C.hardStatus(S, hd, today()))) return toast('Während der Bindung nicht löschbar.'); if (!confirm('Gewohnheit samt Historie löschen?')) return; S.habits = S.habits.filter(x => x.id !== a); delete S.checks[a]; save(); pop(ui.stack.filter(x => x.id === a).length); },
     startTraining: a => { const [mode, date] = a.split(':'); newSession(mode, date || today()); },
     newMove: a => { const m = { id: uid('m'), kind: 'move', date: a || today(), activity: 'Spaziergang', min: 60, note: '', done: true }; S.sessions.push(m); save(); push('move', { id: m.id }); },
-    finish: a => { const s = S.sessions.find(x => x.id === a); s.done = true; s.endedAt = C.nowLocal(); save(); pop(); toast(`Einheit ${s.num} gespeichert`); },
+    finish: a => {
+      const s = S.sessions.find(x => x.id === a); if (!s) return; if (ui.sw) stopSw();
+      cleanSession(s);
+      const diffs = !s.done && s.tpl ? C.tplDiff(S, s) : [];
+      s.items = s.items.filter(it => !it.skip); s.items.forEach(it => { delete it.skipSets; });
+      s.done = true; s.endedAt = s.endedAt || C.nowLocal();
+      if (diffs.length) { ui.tplDiffs = { sid: s.id, list: diffs }; save(); openSheet({ name: 'tplAdjust', sid: s.id }); return; }
+      save(); pop(); toast(`Einheit ${s.num} gespeichert`);
+    },
     deleteSession: a => { if (!confirm('Wirklich löschen?')) return; S.sessions = S.sessions.filter(x => x.id !== a); save(); pop(); },
     trainMore: () => { ui.trainMore = true; render(); },
     addItem: a => {
       let [sid, ex] = a.split(':'); const s = S.sessions.find(x => x.id === sid);
       if (ex.startsWith('cat~')) { const e = C.adopt(S, ex.slice(4)); if (!e) return; ex = e.id; }
+      if (sid === 'tpl') {
+        const d = ui.tplDraft; if (!d) return closeSheet();
+        const l = C.lastItem(S, ex); d.items.push({ ex, sets: l ? setsOf(l.item) : 3, note: '' }); save(); closeSheet(); return;
+      }
+      const sw = ui.f.pick.swap;
+      if (sw !== undefined && s && s.items[sw]) {
+        const it = s.items[sw];
+        if (it.ti !== undefined && it.ti !== null) { if (!it.from) it.from = it.ex; if (it.from === ex) delete it.from; }
+        const n = Math.max(1, it.sets.length); it.ex = ex; delete it.tnote; prefill(s, it, n);
+        delete ui.f.pick.swap; save(); closeSheet(); toast(`${C.exById(S, ex).name} eingesetzt`); return;
+      }
       const e = C.exById(S, ex); const l = C.lastItem(S, ex, sid);
       s.items.push({ ex, sets: l ? cloneSets(l.item.sets) : (e.type === 'done' ? [] : [{}]), note: '', done: false });
       save(); closeSheet(); setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 150);
@@ -1543,6 +1816,7 @@
       } else return;
       it.progOk = p.k; save(); render();
     },
+    ...TPL_ACTIONS,
     addVac: () => {
       const v = { id: uid('v'), from: document.getElementById('vFrom').value, to: document.getElementById('vTo').value };
       const err = C.vacCheck(S, v, null, today()); if (err) return toast(err);
@@ -1661,8 +1935,12 @@
       const ex = C.exById(S, it.ex);
       let v = k === 'incl' ? (el.value.trim() || null) : k === 's' ? C.parseTime(el.value, ex && ex.unit) : C.num(el.value);
       if (ex && ex.type === 'assist' && k === 'w' && v !== null) v = -Math.abs(v);
-      it.sets[si][k] = v; saveSoon();
+      it.sets[si][k] = v; delete it.sets[si].pre; saveSoon();
+      el.removeAttribute('placeholder');
+      if (k === 'w') { const ci = capInfo(s, it); if (ci) { el.classList.toggle('over', typeof v === 'number' && v > ci.lim + 1e-9); const h = document.getElementById(`cap-${s.id}-${a.split(':')[1]}`); if (h) h.hidden = !ci.over; } }
     },
+    tplName: el => { if (ui.tplDraft) ui.tplDraft.name = el.value; },
+    tplNote: (el, a) => { const d = ui.tplDraft; if (d && d.items[Number(a)]) d.items[Number(a)].note = el.value; },
     exSearch: (el, a) => { ui.f[a].q = el.value; const box = document.getElementById('exl-' + a); if (box) box.innerHTML = exListBody(a); },
     itemNote: (el, a) => { const [sid, idx] = a.split(':'); S.sessions.find(x => x.id === sid).items[Number(idx)].note = el.value; saveSoon(); },
     sessNote: (el, a) => { S.sessions.find(x => x.id === a).note = el.value; saveSoon(); },
@@ -1708,6 +1986,7 @@
     },
     hardHint: () => updateHardHint(),
     equip: (el, a) => { const on = equipOn().filter(k => k !== a); if (el.checked) on.push(a); S.settings.equipOn = Object.keys(C.EQUIP).filter(k => on.includes(k)); save(); render(); },
+    tplRot: el => { if (ui.tplDraft) { ui.tplDraft.rot = el.checked; render(); } },
     exTypeShow: el => { const w = document.getElementById('eUnitWrap'); if (w) w.hidden = !['time', 'wtime'].includes(el.value); },
     tabShow: (el, a) => {
       const h = tabHidden().filter(x => x !== a); if (!el.checked) h.push(a);

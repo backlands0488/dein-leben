@@ -495,3 +495,50 @@ label.f>span.row .info{margin:-10px 0;width:32px;height:32px}
 .prog .grow{min-width:0;flex:1 1 100%}
 .prog .grow+.btn{margin-left:auto}
 .prog .btn.sm{min-height:36px}
+
+/* ================= Vorlagen und Rotation ================= */
+.rot{display:flex;flex-direction:column;gap:12px;padding:18px 16px 16px}
+.rot .btn{margin:0}
+.rot-name{font-size:22px;font-weight:700;letter-spacing:-.01em;line-height:1.2;margin:2px 0}
+.tl{width:36px;height:36px;border-radius:50%;background:var(--s2);color:var(--tx);display:grid;place-items:center;font-weight:800;flex:none}
+.tl svg{width:18px;height:18px;color:var(--mu)}
+.tl.big{width:52px;height:52px;font-size:22px;background:var(--pc);color:var(--on-pc)}
+.rchips{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rchip{display:inline-flex;align-items:center;gap:4px;background:var(--s2);color:var(--mu);border-radius:999px;padding:3px 10px;font-size:var(--f-s);font-weight:600}
+.rchip.next{background:transparent;box-shadow:inset 0 0 0 2px var(--accent);color:var(--tx);font-weight:700}
+.ck{display:inline-grid;place-items:center}
+.ck svg{width:13px;height:13px}
+.lbl-row{margin:6px 4px 8px}
+.tplrow{display:flex;align-items:center;gap:12px;width:100%;min-height:60px;padding:8px 12px;margin:0 0 8px;border:0;border-radius:18px;background:var(--s2);color:var(--tx);text-align:left}
+.tplrow b{font-weight:650}
+.tplrow.next{background:var(--pc);color:var(--on-pc);box-shadow:inset 0 0 0 2px var(--accent)}
+.tplrow.next .tl{background:var(--accent);color:var(--on-accent)}
+.tplrow.next .faint{color:inherit;opacity:.85}
+.pill.nx{background:var(--accent);color:var(--on-accent);font-weight:700;flex:none}
+.pill.ok{background:var(--pc);color:var(--on-pc)}
+.srow.tplr{gap:10px}
+.srow.tplr .rowbtn{display:block}
+.tpl-it{padding:12px}
+.tn{width:26px;height:26px;border-radius:50%;background:var(--s2);color:var(--mu);display:grid;place-items:center;font-size:var(--f-xs);font-weight:700;flex:none}
+.tpl-it .tnote-in{min-height:44px;font-size:14px;padding:8px 12px}
+.stepper{display:flex;align-items:center;background:var(--s2);border-radius:999px;flex:none;min-height:44px}
+.stepper button{border:0;background:transparent;width:44px;height:44px;font-size:20px;color:var(--tx);border-radius:50%}
+.stepper button:disabled{opacity:.35}
+.stepper>span{min-width:62px;text-align:center}
+.iconbtn.del{color:var(--danger)}
+.iconbtn:disabled{opacity:.35}
+.ex .iconbtn.sm{flex:none}
+.tnote{display:flex;align-items:center;gap:6px;font-size:var(--f-s);color:var(--mu);margin:6px 0 0}
+.tnote svg{flex:none}
+.ex.skipped{background:transparent;border:1px dashed var(--s3);padding:10px 10px 10px 16px}
+.ex.skipped b{color:var(--mu);text-decoration:line-through}
+.set input.over{background:var(--due-bg);border:2px solid var(--warn);color:var(--due-tx);font-weight:600}
+.caphint{display:flex;align-items:center;gap:8px;background:var(--due-bg);color:var(--due-tx);border-radius:12px;padding:8px 12px;font-size:var(--f-s);margin:0 0 10px}
+.caphint[hidden]{display:none}
+.caphint svg{flex:none}
+.sheet .wlist{background:var(--s2)}
+.sheet .wlist .r{gap:10px}
+.chg{cursor:pointer}
+.chg .sym{width:34px;height:34px;border-radius:50%;background:var(--s3);display:grid;place-items:center;font-weight:700;flex:none}
+input.cb{width:22px;height:22px;accent-color:var(--accent);flex:none;margin:0}
+.tplrow .tl{background:var(--s3)}

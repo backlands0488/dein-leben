@@ -40,7 +40,7 @@
     return {
       app: 'dein-leben', version: 1, settings: { heightCm: null }, habits: [], checks: {}, weights: [],
       measurements: [], exercises: DEFAULT_EXERCISES.map(([id, name, cat, type, uni]) => ({ id, name, cat, type, uni })),
-      sessions: [], pauses: [], vacations: [], lastBackup: null, notices: []
+      sessions: [], pauses: [], vacations: [], templates: [], lastBackup: null, notices: []
     };
   }
   function validate(s) {
@@ -48,7 +48,7 @@
     for (const k of ['habits', 'weights', 'exercises', 'sessions']) if (!Array.isArray(s[k])) throw new Error(`Die Datei ist unvollständig (${k} fehlt).`);
     s.checks = s.checks || {}; s.measurements = s.measurements || []; s.pauses = s.pauses || [];
     s.settings = s.settings || {}; s.notices = s.notices || [];
-    s.goals = s.goals || []; s.goalLog = s.goalLog || []; s.vacations = s.vacations || [];
+    s.goals = s.goals || []; s.goalLog = s.goalLog || []; s.vacations = s.vacations || []; s.templates = s.templates || [];
     migrateKfa(s);
     migrateCatalog(s);
     migrateHard(s);
@@ -513,7 +513,7 @@ mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
   // ---------- Trainingsstatistik ----------
   const counted = s => s.kind === 'training' && (s.done || (s.items && s.items.length));
   const sessMin = s => { if (!s.startedAt || !s.endedAt) return null; const m = (new Date(s.endedAt) - new Date(s.startedAt)) / 6e4; return m > 0 && m <= 240 ? Math.round(m) : null; };
-  const setCount = (ex, it) => ex && ex.type !== 'done' && ex.type !== 'cardio' ? (it.sets || []).filter(x => Object.values(x).some(v => v !== null && v !== undefined && v !== '')).length : 0;
+  const setCount = (ex, it) => ex && ex.type !== 'done' && ex.type !== 'cardio' ? (it.sets || []).filter(x => !x.pre && Object.values(x).some(v => v !== null && v !== undefined && v !== '')).length : 0;
   // Sätze je Muskel: Hauptmuskel zählt ganz, Nebenmuskeln halb
   function trainStats(state, a, b) {
     const out = { n: 0, min: 0, minN: 0, vol: 0, sets: 0, muscles: {}, ex: new Map(), days: new Set() };
@@ -733,7 +733,7 @@ mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
   }
   function lastItem(state, exId, excludeId) {
     const ts = trainings(state).filter(s => s.id !== excludeId).reverse();
-    for (const s of ts) { const it = s.items.find(i => i.ex === exId && (i.sets.length || i.done)); if (it) return { session: s, item: it }; }
+    for (const s of ts) { const it = s.items.find(i => i.ex === exId && (i.sets.some(x => !x.pre) || i.done)); if (it) return { session: s, item: it }; }
     return null;
   }
   function pauseFor(state, cat, day = todayStr()) {
@@ -787,8 +787,9 @@ mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
     const ex = exById(state, exId); if (!ex) return [];
     const out = [];
     for (const s of trainings(state)) for (const it of s.items) {
-      if (it.ex !== exId || !(it.sets.length || it.done || ex.type === 'done')) continue;
-      out.push({ d: s.date, num: s.num, sid: s.id, v: metricValues(ex, it.sets), sets: it.sets, note: it.note || '' });
+      const sets = it.sets.filter(x => !x.pre);
+      if (it.ex !== exId || !(sets.length || it.done || ex.type === 'done')) continue;
+      out.push({ d: s.date, num: s.num, sid: s.id, v: metricValues(ex, sets), sets, note: it.note || '' });
     }
     return out;
   }
@@ -928,6 +929,83 @@ mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
     return { k: 'goal', from: c.hi, hi: rnd(c.hi + st, 0.01), lo: rnd(c.lo + st, 0.01), ...base };
   }
 
+
+  // ---------- Vorlagen ----------
+  // Vorlage: { id, name, rot, archived, items: [{ ex, sets, note }] }; Einheiten aus einer Vorlage tragen tpl, tplItems (Stand beim Start) und je Übung ti
+  const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const tplOf = (state, id) => (state.templates || []).find(t => t.id === id) || null;
+  const rotTemplates = state => (state.templates || []).filter(t => t.rot && !t.archived);
+  function tplLetter(state, t) { const i = rotTemplates(state).indexOf(t); return i < 0 ? '' : LETTERS[i] || ''; }
+  // Runden: Eine Runde ist fertig, wenn jede Vorlage der Rotation mindestens einmal trainiert wurde.
+  // Vorgeschlagen wird die erste noch offene in der Reihenfolge, Ausgelassenes bleibt also als Nächstes stehen.
+  function rotation(state) {
+    const list = rotTemplates(state); if (!list.length) return null;
+    const ids = new Set(list.map(t => t.id));
+    let done = new Set(), round = 1;
+    for (const s of trainings(state)) {
+      if (!s.done || !ids.has(s.tpl)) continue;
+      done.add(s.tpl);
+      if (list.every(t => done.has(t.id))) { done = new Set(); round++; }
+    }
+    return { list, done, round, next: list.find(t => !done.has(t.id)) };
+  }
+  function tplLast(state, id) { const ts = trainings(state).filter(s => s.tpl === id && s.done); return ts.length ? ts[ts.length - 1].date : null; }
+  // Satz zählt, sobald irgendein Wert eingetragen ist
+  const filled = x => Object.keys(x).some(k => k !== 'pre' && x[k] !== null && x[k] !== undefined && x[k] !== '');
+  // Abweichungen einer Einheit von ihrer Vorlage (Stand beim Start)
+  function tplDiff(state, s) {
+    const t = tplOf(state, s.tpl);
+    if (!t || !Array.isArray(s.tplItems) || JSON.stringify(t.items) !== JSON.stringify(s.tplItems)) return [];
+    const out = [], seen = [];
+    let anchor = -1;
+    for (const it of s.items) {
+      if (it.ti === undefined || it.ti === null) {
+        const ex = exById(state, it.ex);
+        out.push({ k: 'add', ex: it.ex, after: anchor, n: Math.max(1, it.sets.filter(filled).length), on: true, ...(ex && ex.type === 'done' ? { n: 1 } : {}) });
+        continue;
+      }
+      anchor = it.ti; seen.push(it.ti);
+      const ti = t.items[it.ti]; if (!ti) continue;
+      if (it.skip) { out.push({ k: 'skip', ti: it.ti, ex: ti.ex, on: false }); continue; }
+      if (it.from) out.push({ k: 'swap', ti: it.ti, ex: it.ex, old: ti.ex, on: true });
+      const ex = exById(state, it.ex);
+      if (ex && ex.type !== 'done') {
+        const n = it.sets.filter(filled).length;
+        if (n > 0 && n !== ti.sets) out.push({ k: 'sets', ti: it.ti, ex: it.ex, n, old: ti.sets, on: n > ti.sets });
+      }
+    }
+    if (seen.some((v, i) => i && v < seen[i - 1])) out.push({ k: 'order', on: false });
+    return out;
+  }
+  // Ausgewählte Abweichungen in die Vorlage übernehmen
+  function tplApply(state, s, sel) {
+    const t = tplOf(state, s.tpl); if (!t) return false;
+    const items = t.items.map(x => ({ ...x })), drop = new Set();
+    for (const c of sel) {
+      if (c.k === 'swap') { items[c.ti].ex = c.ex; items[c.ti].note = ''; }
+      if (c.k === 'sets') items[c.ti].sets = c.n;
+      if (c.k === 'skip') drop.add(c.ti);
+    }
+    const seq = sel.some(c => c.k === 'order') ? s.items.filter(it => it.ti !== undefined && it.ti !== null).map(it => it.ti) : items.map((_, i) => i);
+    const adds = sel.filter(c => c.k === 'add');
+    const out = [];
+    for (const c of adds.filter(c => c.after < 0)) out.push({ ex: c.ex, sets: c.n, note: '' });
+    for (const i of seq) {
+      if (!drop.has(i)) out.push(items[i]);
+      for (const c of adds.filter(c => c.after === i)) out.push({ ex: c.ex, sets: c.n, note: '' });
+    }
+    t.items = out;
+    return true;
+  }
+  // Hinweis bei großem Sprung: mehr als 10 % über dem letzten Arbeitsgewicht und mehr als ein Schritt
+  function capLimit(state, exId, sess) {
+    const ex = exById(state, exId); if (!ex || !LOADED[ex.type] || ex.type === 'assist') return null;
+    const h = progHist(state, ex, sess).filter(x => x.w && isNum(x.w.load) && x.w.load > 0);
+    if (!h.length) return null;
+    const W = h[h.length - 1].w.load, st = progCfg(state, ex).step;
+    return Math.max(rnd(W * (1 + PROG.cap), 0.01), rnd(W + st, 0.01));
+  }
+
   const secTxt = v => v >= 60 && v % 60 === 0 ? v / 60 + ' Min.' : v + ' Sek.';
   function groupRuns(arr) { const out = []; for (const v of arr) { const g = out[out.length - 1]; if (g && g[0] === v) g[1]++; else out.push([v, 1]); } return out; }
   function repsText(r) { r = r.filter(x => x !== null && x !== undefined); if (!r.length) return ''; return r.every(x => x === r[0]) ? `${r.length}×${r[0]}` : r.join('/'); }
@@ -941,7 +1019,8 @@ mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
     trainStats, radarOf, records, weekStreak, sessMin, counted, diffOf, shares,
     HARD, addMonths, winQuota, passes, bufferInfo, hardStatus, hardBound, diffGate, activeCount, activateBlock, tickHard, hardViolations, migrateHard,
     PROG, LOADED, progable, perfKey, PERF_UNIT, stepDefault, progDefaultOn, workSets, progHist, progDerive, progStd, progCfg, settleProg, progFor, backLoad, stepUp, stepDown,
-    VAC_BACK, vacSet, offDays, vacOn, weekOff, vacCheck, winFrom, minEnd, hardFrom
+    VAC_BACK, vacSet, offDays, vacOn, weekOff, vacCheck, winFrom, minEnd, hardFrom,
+    LETTERS, tplOf, rotTemplates, tplLetter, rotation, tplLast, filled, tplDiff, tplApply, capLimit
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
 })(typeof self !== 'undefined' ? self : this);
