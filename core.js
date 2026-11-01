@@ -170,6 +170,11 @@
     const xs = inWindow(weights, day, TREND.days);
     return { kg: xs.length >= TREND.min ? xs.reduce((a, w) => a + w.kg, 0) / xs.length : null, n: xs.length };
   }
+  // Trend am Tag oder, falls dort zu wenig Messungen liegen, am letzten Tag davor mit gültigem Trend (höchstens back Tage zurück)
+  function trendNear(weights, day = todayStr(), back = 14) {
+    for (let i = 0; i <= back; i++) { const d = addDays(day, -i), t = trendAt(weights, d); if (t.kg !== null) return { kg: t.kg, d }; }
+    return { kg: null, d: null };
+  }
   // Trendverlauf für das Diagramm, gleitendes Fenster in einem Durchlauf
   function trendSeries(weights, from, to) {
     const ws = sortW(weights), out = []; let i0 = 0, i1 = 0, sum = 0;
@@ -279,8 +284,35 @@
     if (vacMemo.k !== k) { const s = new Set(); for (const v of state.vacations || []) for (const d of dayRange(v.from, v.to)) s.add(d); vacMemo = { k, set: s }; }
     return vacMemo.set;
   }
+  // Ab 2.11.0 wirkt ein geänderter Schalter erst ab Beginn des laufenden Urlaubs (sonst ab dem Tag der Änderung).
+  // h.vacLog = [{ from, vac }] aufsteigend; der erste Eintrag (from '') hält den Wert davor. Ohne Log gilt h.vac für alle Urlaube.
+  const vacAt = (h, d) => {
+    const L = h && h.vacLog;
+    if (!L || !L.length) return h ? h.vac : undefined;
+    let v = L[0].vac; for (const e of L) { if (e.from <= d) v = e.vac; else break; }
+    return v;
+  };
+  const vacMemoH = new Map();
+  function vacOffSet(state, h) {
+    if (!h || !h.vacLog || !h.vacLog.length) return h && h.vac === false ? vacSet(state) : NONE;
+    const all = vacSet(state), k = `${vacMemo.k}|${JSON.stringify(h.vacLog)}`, m = vacMemoH.get(h.id);
+    if (m && m.k === k) return m.set;
+    const set = new Set(); for (const d of all) if (vacAt(h, d) === false) set.add(d);
+    const out = set.size ? set : NONE; vacMemoH.set(h.id, { k, set: out }); return out;
+  }
+  // Schalter „Auch im Urlaub“ ändern (val === false = pausiert). Abgeschlossene Urlaube bleiben, wie sie gewertet wurden.
+  function setVac(state, h, val, today = todayStr()) {
+    const cur = vacAt(h, today) !== false, next = val !== false;
+    if (cur === next) { h.vac = next; return null; }
+    const run = vacOn(state, today), from = run ? run.from : today;
+    const L = h.vacLog && h.vacLog.length ? h.vacLog : [{ from: '', vac: h.vac !== false }];
+    const kept = L.filter(e => e.from < from);
+    if (kept[kept.length - 1].vac !== next) kept.push({ from, vac: next });
+    h.vacLog = kept; h.vac = next;
+    return from;
+  }
   const offDays = (state, h) => {
-    const v = h && h.vac === false ? vacSet(state) : NONE;
+    const v = vacOffSet(state, h);
     if (!autoGoal(h)) return v;
     const few = goalDays(state, h).few;
     return few.size ? new Set([...v, ...few]) : v;
@@ -383,12 +415,13 @@
   // Gewichtsziel: erreicht oder abgelaufen -> archivieren
   function checkGoals(state, today = todayStr()) {
     const out = [];
-    const ws = weightStatus(state.weights, today);
+    // ab 2.11.0 zählt der 7-Tage-Trend (wie beim Kurs), nicht mehr der 30-Tage-Ø
+    const tr = trendAt(state.weights, today);
     for (const h of state.habits) {
       if (h.archived || h.link !== 'weightgoal' || !h.goal) continue;
-      if (ws.avg !== null && ws.avg <= h.goal.kg) {
+      if (tr.kg !== null && tr.kg <= h.goal.kg) {
         h.archived = true; h.archivedOn = today; h.result = 'erreicht';
-        out.push(`Ziel erreicht: Dein 30-Tage-Durchschnitt liegt bei ${fmt(ws.avg)} kg. „${h.name}“ ist jetzt archiviert.`);
+        out.push(`Ziel erreicht: Dein 7-Tage-Trend liegt bei ${fmt(tr.kg)} kg. „${h.name}“ ist jetzt archiviert.`);
       } else if (today > h.goal.deadline) {
         h.archived = true; h.archivedOn = h.goal.deadline; h.result = 'abgelaufen';
         out.push(`Der Stichtag für „${h.name}“ ist vorbei. Die Gewohnheit ist archiviert, ihre Historie bleibt erhalten.`);
@@ -425,11 +458,12 @@
       return { started, value: n, target: g.target, soll, done: n >= g.target };
     }
     if (g.type === 'weight') {
-      const ws = weightStatus(state.weights, today);
-      const startAvg = started ? avg30(ws.daily, addDays(start, -1)) : null;
+      // ab 2.11.0: 7-Tage-Trend statt 30-Tage-Ø (heute, am 31.12. des Vorjahres als Start und am 31.12. als Wertung)
+      const ws = weightStatus(state.weights, today), value = trendNear(state.weights, today).kg;
+      const startAvg = started ? trendNear(state.weights, addDays(start, -1), 31).kg : null;
       const soll = startAvg !== null ? startAvg + (g.target - startAvg) * elapsed / total : null;
-      const tp = tempo(ws.daily, today);
-      return { started, value: ws.avg, target: g.target, soll, startAvg, tempo: tp, fc: forecast(ws.avg, tp, g.target, today), done: today >= end && ws.avg !== null && avg30(ws.daily, end) <= g.target };
+      const tp = tempo(ws.daily, today), endKg = today >= end ? trendNear(state.weights, end).kg : null;
+      return { started, value, target: g.target, soll, startAvg, tempo: tp, fc: forecast(value, tp, g.target, today), done: endKg !== null && endKg <= g.target };
     }
     return { started };
   }
@@ -1135,9 +1169,9 @@ mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
     trainStats, radarOf, records, weekStreak, sessMin, counted, diffOf, shares,
     HARD, addMonths, winQuota, passes, bufferInfo, hardStatus, hardBound, diffGate, activeCount, activateBlock, tickHard, hardViolations, migrateHard,
     PROG, LOADED, progable, perfKey, PERF_UNIT, stepDefault, progDefaultOn, workSets, progHist, progDerive, progStd, progCfg, settleProg, progFor, backLoad, stepUp, stepDown,
-    VAC_BACK, vacSet, offDays, vacOn, weekOff, vacCheck, winFrom, minEnd, hardFrom,
+    VAC_BACK, vacSet, vacAt, setVac, offDays, vacOn, weekOff, vacCheck, winFrom, minEnd, hardFrom,
     LETTERS, tplOf, rotTemplates, tplLetter, rotation, tplLast, filled, tplDiff, tplApply, capLimit,
-    TREND, trendAt, trendSeries, paceAt, course, autoGoal, goalDays, migrateGoalAuto, weekdayDiff, lastWeighDay, wKey, altDuplicates, isAltFat, fatPoints, sessDur, markStart
+    TREND, trendAt, trendNear, trendSeries, paceAt, course, autoGoal, goalDays, migrateGoalAuto, weekdayDiff, lastWeighDay, wKey, altDuplicates, isAltFat, fatPoints, sessDur, markStart
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
 })(typeof self !== 'undefined' ? self : this);

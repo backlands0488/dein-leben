@@ -492,7 +492,7 @@
   }
   function targetFields(h) {
     const cur = h ? C.targetAt(h, C.weekStart(today())) : 3;
-    return `<div class="fields"><label class="f"><span>Mal pro Woche</span><input type="text" inputmode="numeric" id="hTarget" data-input="hardHint" value="${cur || 3}"></label>
+    return `<div class="fields" ${h && h.type === 'weekly' ? 'style="grid-template-columns:minmax(0,1fr) minmax(0,1.8fr)"' : ''}><label class="f"><span>Mal pro Woche</span><input type="text" inputmode="numeric" id="hTarget" data-input="hardHint" value="${cur || 3}"></label>
       ${h && h.type === 'weekly' ? `<label class="f"><span>Änderung gilt</span><select id="hTargetFrom"><option value="now">ab dieser Woche</option><option value="all">rückwirkend für alle Wochen</option></select></label>` : ''}</div>
       ${h && h.type === 'weekly' ? '<p class="faint small" style="margin-top:-6px">„Ab dieser Woche“ lässt deine bisherigen Serien und Quoten unverändert.</p>' : '<p class="faint small" style="margin-top:-6px">Nur relevant bei „X-mal pro Woche“.</p>'}`;
   }
@@ -512,15 +512,15 @@
       <label class="f"><span class="row between">Schwierigkeit ${infoBtn('hard')}</span><select id="hDiff" data-change="hardHint">${diffOpts(h, diff)}</select></label>
       ${note ? `<p class="faint small" style="margin:-6px 0 12px">${note}</p>` : ''}
       <div id="hHint" data-id="${h ? h.id : ''}">${hardHint(h, { diff, type: ftype, target: h ? C.targetAt(h, C.weekStart(today())) : 3, start: v.start })}</div>
-      <div class="row between" style="margin:0 0 14px"><label class="check"><input type="checkbox" id="hVac" ${v.vac !== false ? 'checked' : ''} ${bound && h && h.vac !== false ? 'disabled' : ''}> Auch im Urlaub</label>${infoBtn('vac')}</div>
+      <div class="row between" style="margin:0 0 14px"><label class="check"><input type="checkbox" id="hVac" ${v.vac !== false ? 'checked' : ''}> Auch im Urlaub</label>${infoBtn('vac')}</div>
       <div class="fields"><label class="f"><span>Symbol (Emoji)</span><input type="text" id="hEmoji" value="${esc(v.emoji)}"></label>
       <label class="f"><span>Beginn</span><input type="date" id="hStart" data-change="hardHint" value="${v.start}" ${!h && diff === 5 ? `min="${tomorrow()}"` : ''}></label></div>
       ${h && h.link === 'sport' ? `<p class="faint small">Wird automatisch durch deine Trainings abgehakt. Die Art bleibt deshalb „X-mal pro Woche“.</p>${targetFields(h)}` : ''}
-      ${h && h.link === 'weightgoal' ? `<p class="faint small">Verknüpft mit deinem Gewicht: Ein Tag gilt als erfüllt, wenn du auf Kurs bist (7-Tage-Trend, Tempo der letzten 28 Tage); bei zu wenig Daten zählt er nicht. Ist der 30-Tage-Durchschnitt am Ziel oder der Stichtag vorbei, wird die Gewohnheit archiviert. Den Namen passt du bei Bedarf oben selbst an.</p>
+      ${h && h.link === 'weightgoal' ? `<p class="faint small">Verknüpft mit deinem Gewicht: Ein Tag gilt als erfüllt, wenn du auf Kurs bist (7-Tage-Trend, Tempo der letzten 28 Tage); bei zu wenig Daten zählt er nicht. Liegt der 7-Tage-Trend am Ziel oder ist der Stichtag vorbei, wird die Gewohnheit archiviert. Den Namen passt du bei Bedarf oben selbst an.</p>
       <div class="fields"><label class="f"><span>Zielgewicht (kg)</span><input type="text" inputmode="decimal" id="hGoalKg" value="${C.fmt(h.goal.kg)}"></label>
       <label class="f"><span>Stichtag</span><input type="date" id="hGoalDate" value="${h.goal.deadline}"></label></div>` : ''}
       ${h && h.link ? '' : `
-      <div class="fields"><label class="f"><span>Art</span><select id="hType" data-change="hardHint" ${bound ? 'disabled' : ''}><option value="daily" ${v.type === 'daily' && v.kind !== 'verzicht' ? 'selected' : ''}>Täglich</option><option value="verzicht" ${v.kind === 'verzicht' ? 'selected' : ''}>Täglich (Verzicht)</option><option value="weekly" ${v.type === 'weekly' ? 'selected' : ''}>X-mal pro Woche</option></select></label></div>
+      <div><label class="f"><span>Art</span><select id="hType" data-change="hardHint" ${bound ? 'disabled' : ''}><option value="daily" ${v.type === 'daily' && v.kind !== 'verzicht' ? 'selected' : ''}>Täglich</option><option value="verzicht" ${v.kind === 'verzicht' ? 'selected' : ''}>Täglich (Verzicht)</option><option value="weekly" ${v.type === 'weekly' ? 'selected' : ''}>X-mal pro Woche</option></select></label></div>
       ${targetFields(h)}`}
       ${bound ? `<p class="faint small" style="margin:-6px 0 12px">Während der Bindung bleibt die Art fest und das Wochenziel kann nicht sinken.</p>` : ''}
       <label class="f"><span>Farbe</span><div class="swatches">${COLORS.map(c => `<button class="swatch" style="background:${c}" aria-pressed="${c === ui.draftColor}" data-act="color" data-arg="${c}" aria-label="Farbe ${c}"></button>`).join('')}</div></label>
@@ -603,14 +603,15 @@
     }
     const badges = `${paused ? '<span class="badge pause">pausiert</span> ' : ''}<span class="badge"><i class="cdot" style="--c:${catCol(ex.cat)}"></i>${esc(ex.cat)}</span>`;
     const head = run
-      ? `<div class="row" style="align-items:flex-start;gap:6px"><h3 class="grow" style="min-width:0">${esc(ex.name)}${ex.uni ? ' <span class="faint small">pro Seite</span>' : ''}</h3><button class="iconbtn sm" data-act="swapItem" data-arg="${s.id}:${idx}" aria-label="${esc(ex.name)} tauschen">${SWAP}</button>${fromTpl ? `<button class="iconbtn sm" data-act="skipItem" data-arg="${s.id}:${idx}" aria-label="${esc(ex.name)} auslassen">${SKIP}</button>` : ''}</div>
+      ? `<div class="row" style="align-items:flex-start;gap:6px"><h3 class="grow" style="min-width:0">${esc(ex.name)}${ex.uni ? ' <span class="faint small nw">pro Seite</span>' : ''}</h3><button class="iconbtn sm" data-act="swapItem" data-arg="${s.id}:${idx}" aria-label="${esc(ex.name)} tauschen">${SWAP}</button>${fromTpl ? `<button class="iconbtn sm" data-act="skipItem" data-arg="${s.id}:${idx}" aria-label="${esc(ex.name)} auslassen">${SKIP}</button>` : ''}</div>
         <div class="row between" style="gap:8px;align-items:flex-start"><p class="last" style="min-width:0">${lastTxt}</p><span style="flex:none;margin-top:4px">${badges}</span></div>`
-      : `<div class="row between"><h3>${esc(ex.name)}${ex.uni ? ' <span class="faint small">pro Seite</span>' : ''}</h3><span>${badges}</span></div><p class="last">${lastTxt}</p>`;
+      : `<div class="row between"><h3>${esc(ex.name)}${ex.uni ? ' <span class="faint small nw">pro Seite</span>' : ''}</h3><span>${badges}</span></div><p class="last">${lastTxt}</p>`;
     return `<div class="ex ${paused ? 'paused' : ''}">${head}${it.tnote ? `<p class="tnote">${PIN}<span>${esc(it.tnote)}</span></p>` : ''}${progAutoBanner(s, it, idx, ex)}${progBanner(s, it, idx, ex)}${body}
       <input type="text" style="margin-top:10px;min-height:40px;font-size:14px" placeholder="Notiz zur Übung" value="${esc(it.note || '')}" data-input="itemNote" data-arg="${s.id}:${idx}">
-      <div class="row" style="justify-content:flex-end;margin-top:8px">${last ? `<button class="btn sm ghost" data-act="open" data-arg="exStats:${it.ex}">Verlauf</button>` : ''}${C.progable(ex) ? `<button class="btn sm ${it.pain ? 'danger' : 'ghost'}" data-act="pain" data-arg="${s.id}:${idx}" aria-pressed="${!!it.pain}">Beschwerden</button>` : ''}<span class="grow"></span><button class="btn sm ghost" data-act="moveItem" data-arg="${s.id}:${idx}:-1" aria-label="Nach oben">↑</button><button class="btn sm ghost" data-act="moveItem" data-arg="${s.id}:${idx}:1" aria-label="Nach unten">↓</button><button class="btn sm danger" data-act="delItem" data-arg="${s.id}:${idx}" aria-label="Übung entfernen">✕</button></div></div>`;
+      <div class="ex-acts"><span class="grp">${last ? `<button class="btn sm ghost rd" data-act="open" data-arg="exStats:${it.ex}" aria-label="Verlauf" title="Verlauf">${HIST}</button>` : ''}${C.progable(ex) ? `<button class="btn sm ${it.pain ? 'danger' : 'ghost'}" data-act="pain" data-arg="${s.id}:${idx}" aria-pressed="${!!it.pain}">Beschwerden</button>` : ''}</span><span class="grp end"><button class="btn sm ghost rd" data-act="moveItem" data-arg="${s.id}:${idx}:-1" aria-label="Nach oben">↑</button><button class="btn sm ghost rd" data-act="moveItem" data-arg="${s.id}:${idx}:1" aria-label="Nach unten">↓</button><button class="btn sm danger rd" data-act="delItem" data-arg="${s.id}:${idx}" aria-label="Übung entfernen">✕</button></span></div></div>`;
   }
   // ---------- Vorlagen ----------
+  const HIST = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19h16M6 15l4-5 3 3 5-6"/></svg>';
   const SWAP = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h14l-3-3M20 16H6l3 3"/></svg>';
   const SKIP = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h12M12 6l6 6-6 6M20 5v14"/></svg>';
   const PIN = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4h6l-1 6 3 3H7l3-3zM12 13v7"/></svg>';
@@ -1421,7 +1422,7 @@
       <label class="srow" style="cursor:pointer;margin-top:8px"><span class="grow"><b>KFA-Altdaten zeigen</b><span class="faint small" style="display:block">geschätzt von der alten App</span></span><input type="checkbox" class="sw" ${showAltFat() ? 'checked' : ''} data-change="altFat" aria-label="Geschätzte KFA-Altdaten zeigen"></label></div>
       <div class="wlist">${row('dups', 'Mögliche Duplikate', `${C.altDuplicates(S.weights, setting('dupKeep', [])).filter(x => !x.kept).length} offen`)}</div>
       <p class="faint small" id="persist" style="margin:18px 0 4px">…</p>
-      <p class="faint small" style="margin:0">Dein Leben 2.10.0</p>`;
+      <p class="faint small" style="margin:0">Dein Leben 2.11.0</p>`;
   }
   const DEFAULTS = { dotShape: 'bar', dotLabel: 'none', heuteView: 'tiles', trainStart: 'ask', weightRange: 'auto', backupDays: 7, weighStale: 3 };
   const iconOf = k => `<span class="sn"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg></span>`;
@@ -1520,7 +1521,7 @@
   }
 
   // ===== ZIELE =====
-  const GTYPES = { habit: 'Gewohnheit: Tage im Jahr', trainings: 'Trainingseinheiten (Studio)', weight: 'Gewicht: 30-Tage-Ø am 31.12.' };
+  const GTYPES = { habit: 'Gewohnheit: Tage im Jahr', trainings: 'Trainingseinheiten (Studio)', weight: 'Gewicht: 7-Tage-Trend am 31.12.' };
   function goalYears() { const y = Number(today().slice(0, 4)); return [String(y), String(y + 1)]; }
   function defaultGoalYear() { const [a, b] = goalYears(); return S.goals.some(g => String(g.year) === a) ? a : b; }
   function lockShort(lock) {
@@ -1545,9 +1546,9 @@
       else { const diff = p.value - Math.round(p.soll); frac = p.value / g.target; soll = p.soll / g.target; sub = `Soll ${Math.round(p.soll)} · ${diff === 0 ? 'im Plan' : diff > 0 ? `+${diff}` : `${diff}`}`; }
     } else if (g.type === 'weight') {
       val = `${C.fmt(p.value)}<span> / ${C.fmt(g.target)} kg</span>`;
-      if (!p.started) sub = `Ø am 31.12.${g.year}`;
+      if (!p.started) sub = `Trend am 31.12.${g.year}`;
       else {
-        if (p.startAvg !== null && p.startAvg > g.target) { frac = (p.startAvg - p.value) / (p.startAvg - g.target); soll = (C.diffDays(`${g.year}-01-01`, today()) + 1) / C.daysInYear(g.year); }
+        if (p.value !== null && p.startAvg !== null && p.startAvg > g.target) { frac = (p.startAvg - p.value) / (p.startAvg - g.target); soll = (C.diffDays(`${g.year}-01-01`, today()) + 1) / C.daysInYear(g.year); }
         sub = [p.soll !== null ? `Soll ${C.fmt(p.soll)}` : '', p.fc && p.fc.date ? `≈ ${mon(p.fc.date)}` : ''].filter(Boolean).join(' · ');
       }
     }
@@ -1581,7 +1582,7 @@
       <label class="f" data-gtype="habit" ${show('habit')}><span>Gewohnheit</span><select id="gHabit">${habits.map(h => `<option value="${h.id}" ${h.id === v.habitId ? 'selected' : ''}>${esc(h.emoji)} ${esc(h.name)}</option>`).join('')}</select></label>
       <label class="f" data-gtype="habit" ${show('habit')}><span>Ziel: Tage in ${y} (alle Tage = ${C.daysInYear(y)})</span><input type="text" inputmode="numeric" id="gTargetHabit" value="${v.type === 'habit' ? v.target : C.daysInYear(y)}"></label>
       <label class="f" data-gtype="trainings" ${show('trainings')}><span>Ziel: Studio-Einheiten in ${y}</span><input type="text" inputmode="numeric" id="gTargetTr" value="${v.type === 'trainings' ? v.target : 100}"></label>
-      <label class="f" data-gtype="weight" ${show('weight')}><span>Ziel: 30-Tage-Ø am 31.12.${y} höchstens (kg)</span><input type="text" inputmode="decimal" id="gTargetW" value="${v.type === 'weight' ? C.fmt(v.target) : ''}" placeholder="92"></label>
+      <label class="f" data-gtype="weight" ${show('weight')}><span>Ziel: 7-Tage-Trend am 31.12.${y} höchstens (kg)</span><input type="text" inputmode="decimal" id="gTargetW" value="${v.type === 'weight' ? C.fmt(v.target) : ''}" placeholder="92"></label>
       ${lock.needsReason ? `<label class="f"><span>Begründung (Pflicht im Halbjahresfenster)</span><textarea id="gReason" placeholder="Warum passt du das Ziel an?"></textarea></label>` : ''}
       <button class="btn primary block" data-act="saveGoal" data-arg="${g ? g.id : ''}:${y}">Speichern</button>
       ${g ? `<div style="height:10px"></div><button class="btn danger block" data-act="deleteGoal" data-arg="${g.id}">Ziel löschen</button>` : ''}`;
@@ -1593,9 +1594,9 @@
 
   // ---------- Sheets ----------
   const INFOS = {
-    ziele: ['Wie Ziele funktionieren', () => `<p><b>Arten:</b> ${Object.values(GTYPES).join(' · ')}.</p>
+    ziele: ['Wie Ziele funktionieren', () => `<p><b>Arten:</b> ${Object.values(GTYPES).join(' · ').replace(/\.$/, '')}.</p>
       <p><b>Ring:</b> Anteil am Jahresziel. Der Strich zeigt, wo du heute laut gleichmäßigem Plan stehen solltest.</p>
-      <p><b>Gewicht:</b> Es zählt der 30-Tage-Ø am 31.12. Der Plan läuft linear vom Ø am Jahresanfang bis zum Ziel; die Prognose schreibt dein Tempo der letzten 8 Wochen fort.</p>
+      <p><b>Gewicht:</b> Es zählt der 7-Tage-Trend am 31.12. (Mittel aller Messungen der letzten 7 Tage, ab 3 Messungen). Der Plan läuft linear vom Trend am Jahresanfang bis zum Ziel; die Prognose schreibt dein Tempo der letzten 8 Wochen fort.</p>
       <p><b>Sperre:</b> Bis 31.12. des Vorjahres frei änderbar, höchstens drei Ziele. Ab 01.01. gesperrt, außer vom 24. bis 30.06. mit schriftlicher Begründung.</p>`],
     backup: ['Backup', () => `<p>Deine Daten liegen nur auf diesem Handy. ${backupDays() === 1 ? 'Jeden Tag' : `Alle ${backupDays()} Tage`} speichert die App beim ersten Tippen nach dem Öffnen automatisch ein Backup in „Downloads“.</p>
       <p><b>Wiederherstellen</b> ersetzt alle Daten in der App durch die gewählte Datei.</p>`],
@@ -1619,7 +1620,8 @@
     vac: ['Urlaub', () => `<p><b>Pausiert</b> eine Gewohnheit im Urlaub, zählen Urlaubstage weder als erledigt noch als verpasst. Serien laufen weiter, Quoten rechnen ohne diese Tage. Abhaken geht trotzdem und zählt.</p>
       <p><b>X-mal pro Woche:</b> Nur eine ganze Urlaubswoche (Mo–So) ist frei, sonst gilt das volle Wochenziel.</p>
       <p><b>Wochenring:</b> Urlaubstage pausierter Gewohnheiten zählen hier gar nicht. Läuft wegen Urlaub nichts, zeigt er 🏖, und die Serie pausiert.</p>
-      <p><b>Feste Regeln:</b> Mindestdauer und 98-%-Fenster verlängern sich um die Urlaubstage. In der Bindung lässt sich „Auch im Urlaub“ nur ein-, nicht ausschalten.</p>
+      <p><b>Feste Regeln:</b> Mindestdauer und 98-%-Fenster verlängern sich um pausierte Urlaubstage.</p>
+      <p><b>Umschalten:</b> „Auch im Urlaub“ lässt sich bei jeder Gewohnheit ändern, auch bei schweren in der Bindung. Die Änderung gilt ab Beginn des laufenden Urlaubs (sonst ab heute); abgeschlossene Urlaube bleiben, wie sie gewertet wurden.</p>
       <p><b>Eintragen</b> höchstens ${C.VAC_BACK} Tage rückwirkend. Verkürzen und Löschen gehen immer.</p>`],
     prog: ['Progression', () => `<p><b>Steigerung</b> schlägt die App vor, wenn du in den letzten ${C.PROG.n} Einheiten innerhalb von ${C.PROG.days} Tagen mit demselben Gewicht in allen Arbeitssätzen (mind. ${C.PROG.minSets}) die Obergrenze geschafft hast. Leichtere Aufwärmsätze zählen nicht.</p>
       <p><b>Schritt:</b> immer der kleinste. Ist er größer als 10 % des Gewichts, brauchst du vorher ${C.PROG.extraR} Wdh. mehr (bei Zeit und Strecke 20 % mehr). Höchstens eine Steigerung je 4 Wochen.</p>
@@ -1717,7 +1719,6 @@
     if (C.hardBound(g.st) && h0) {
       const curT = C.targetAt(h0, C.weekStart(today()));
       if (h0.type === 'weekly' && f.target && f.target < curT) { toast('Während der Bindung kann das Wochenziel nicht sinken.'); return false; }
-      if (h0.vac !== false && f.vac === false) { toast('Während der Bindung läuft sie auch im Urlaub weiter.'); return false; }
     }
     if (h0 && h0.link === 'weightgoal' && (!f.goalKg || f.goalKg < 30 || f.goalKg > 300)) { toast('Prüfe das Zielgewicht.'); return false; }
     if (h0 && h0.link === 'weightgoal' && !f.goalDate) { toast('Gib einen Stichtag an.'); return false; }
@@ -1728,7 +1729,7 @@
     const a = f.id, h = h0 || { id: uid('h'), link: null, archived: false, created: today() };
     h.name = f.name; h.emoji = f.emoji; h.plan = f.plan || undefined;
     h.start = f.start; h.color = f.color || h.color || COLORS[3];
-    if (f.vac !== null && f.vac !== undefined) h.vac = f.vac;
+    if (f.vac !== null && f.vac !== undefined) { if (h0) C.setVac(S, h, f.vac, today()); else h.vac = f.vac; }
     const newT = f.target, wasWeekly = h.type === 'weekly';
     if (f.typeVal) { const v = f.typeVal; h.type = v === 'weekly' ? 'weekly' : 'daily'; h.kind = v === 'verzicht' ? 'verzicht' : undefined; }
     if (h.type === 'weekly' && newT) {

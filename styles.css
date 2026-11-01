@@ -561,3 +561,10 @@ input.cb{width:22px;height:22px;accent-color:var(--accent);flex:none;margin:0}
 .dup .btn.sm{min-height:44px}
 .card.waist{display:block;color:var(--tx);font:inherit;border:0}
 .card.waist .unit{font-size:var(--f-s);color:var(--mu);font-weight:500}
+/* 2.11.0: Aktionszeile der Übungskarte – bleibt innerhalb der Karte, links und rechts bündig */
+.nw{white-space:nowrap}
+.ex-acts{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 6px;margin-top:8px}
+.ex-acts .grp{display:flex;align-items:center;gap:6px;min-width:0}
+.ex-acts .grp.end{margin-left:auto}
+.ex-acts .btn.sm{padding:8px 12px}
+.ex-acts .btn.rd{width:36px;min-height:36px;height:36px;padding:0;display:grid;place-items:center;flex:none}
