@@ -58,15 +58,14 @@
   const showAltFat = () => setting('showAltFat', false) === true;
   const goalHabit = () => S.habits.find(h => !h.archived && h.link === 'weightgoal' && h.goal) || null;
   const kgWeek = v => `${v < -0.004 ? '−' : v > 0.004 ? '+' : '±'}${C.fmt(Math.abs(v), 2)} kg/Woche`;
-  // Kurs als eine Zeile: „Aktuell −0,56 kg/Woche · nötig −0,41 kg/Woche · auf Kurs“
+  // Kurs als eine Zeile: „Ø 30 Tage 110,4 · Soll 110,6 kg · auf Kurs“ (ab 2.12.0: 30-Tage-Ø gegen Soll-Linie)
   function courseTxt(c) {
     if (!c || c.status === 'nogoal') return '';
-    if (c.status === 'few') return 'zu wenig Daten für eine Prognose';
+    if (c.status === 'few') return c.line ? `zu wenig Daten (unter ${C.GOAL.minDays} Wiegetagen in 30 Tagen)` : 'zu wenig Daten für die Soll-Linie';
     if (c.status === 'reached') return 'Trend am Ziel';
     if (c.status === 'late') return 'Stichtag vorbei';
-    const w = c.delayWeeks === null ? null : Math.max(1, Math.round(c.delayWeeks));
-    const tail = c.status === 'on' ? 'auf Kurs' : w === null ? 'bei diesem Tempo kein Erreichen' : `ca. ${w} ${w === 1 ? 'Woche' : 'Wochen'} Verzug`;
-    return `Aktuell ${kgWeek(c.pace)} · nötig ${kgWeek(c.need)} · ${tail}`;
+    const tail = c.status === 'on' ? 'auf Kurs' : `${C.fmt(c.diff)} kg darüber`;
+    return `Ø 30 Tage ${C.fmt(c.avg)} · Soll ${C.fmt(c.soll)} kg · ${tail}`;
   }
   const courseCls = c => !c ? '' : c.status === 'on' || c.status === 'reached' ? 'good' : c.status === 'off' || c.status === 'late' ? 'bad' : 'faint';
   // Gewohnheiten in eigener Reihenfolge; noch nicht einsortierte kommen in alter Reihenfolge ans Ende
@@ -254,7 +253,7 @@
   function heuteWeight(d) {
     const last = C.lastWeighDay(S.weights), ago = last ? C.diffDays(last, d) : null, stale = ago === null || ago >= weighStale();
     const agoTxt = ago === null ? 'noch nie gewogen' : ago <= 0 ? 'heute gewogen' : ago === 1 ? 'gestern gewogen' : `gewogen vor ${ago} Tagen`;
-    const h = goalHabit(), c = h ? C.course(S.weights, h.goal, d) : null, tr = C.trendAt(S.weights, d);
+    const h = goalHabit(), c = h ? C.goalCourse(S.weights, h, d) : null, tr = C.trendAt(S.weights, d);
     const nav = tabOrder().includes('gewicht') ? 'data-act="tab" data-arg="gewicht"' : '';
     return `<button class="wline" ${nav}><span class="wl-top"><b class="num">${tr.kg === null ? '–' : C.fmt(tr.kg)} kg</b><span class="faint small">Trend</span><span class="grow"></span><span class="wl-ago num ${stale ? 'stale' : 'faint'}">${agoTxt}</span></span>${c ? `<span class="wl-course num ${courseCls(c)}">${courseTxt(c)}</span>` : ''}</button>`;
   }
@@ -367,11 +366,11 @@
     const unit = h.type === 'weekly' ? 'Wochen' : 'Tage';
     let goal = '';
     if (h.link === 'weightgoal' && h.goal) {
-      const c = C.course(S.weights, h.goal, d);
+      const c = C.goalCourse(S.weights, h, d);
       goal = `<div class="card"><div class="lbl">Trend · 7 Tage</div><div class="big num">${c.trend === null ? '–' : C.fmt(c.trend) + ' kg'}</div>
         <div class="pills">${c.trend !== null && c.trend > h.goal.kg ? `<span class="pill">noch ${C.fmt(c.trend - h.goal.kg)} kg</span>` : ''}<span class="pill">${C.fmt(h.goal.kg)} kg bis ${dNum(h.goal.deadline)}</span></div>
         <p class="num ${courseCls(c)}" style="margin:10px 0 0">${courseTxt(c)}</p>
-        ${h.autoFrom ? `<p class="faint small" style="margin:6px 0 0">Seit ${dNum(h.autoFrom)} automatisch: erfüllt, wenn auf Kurs; bei zu wenig Daten zählt der Tag nicht. Häkchen davor bleiben, wie sie sind.</p>` : ''}</div>`;
+        ${h.autoFrom ? `<p class="faint small" style="margin:6px 0 0">Seit ${dNum(h.autoFrom)} automatisch: erfüllt, wenn dein 30-Tage-Ø auf oder unter der Soll-Linie liegt${c.line ? ` (${C.fmt(c.line.kg)} kg am ${dNum(c.line.d)} → ${C.fmt(h.goal.kg)} kg am ${dNum(h.goal.deadline)})` : ''}; unter ${C.GOAL.minDays} Wiegetagen in 30 Tagen zählt der Tag nicht. Häkchen davor bleiben, wie sie sind.</p>` : ''}</div>`;
     }
     const tNow = C.targetAt(h, C.weekStart(d));
     const pills = [h.type === 'weekly' ? `${tNow}× pro Woche` : (h.kind === 'verzicht' ? 'täglich · Verzicht' : 'täglich'), h.link === 'sport' ? 'automatisch aus Training' : '', `seit ${dNum(h.start)}`, h.archived ? `archiviert${h.result ? ' · ' + esc(h.result) : ''}` : ''].filter(Boolean);
@@ -516,7 +515,7 @@
       <div class="fields"><label class="f"><span>Symbol (Emoji)</span><input type="text" id="hEmoji" value="${esc(v.emoji)}"></label>
       <label class="f"><span>Beginn</span><input type="date" id="hStart" data-change="hardHint" value="${v.start}" ${!h && diff === 5 ? `min="${tomorrow()}"` : ''}></label></div>
       ${h && h.link === 'sport' ? `<p class="faint small">Wird automatisch durch deine Trainings abgehakt. Die Art bleibt deshalb „X-mal pro Woche“.</p>${targetFields(h)}` : ''}
-      ${h && h.link === 'weightgoal' ? `<p class="faint small">Verknüpft mit deinem Gewicht: Ein Tag gilt als erfüllt, wenn du auf Kurs bist (7-Tage-Trend, Tempo der letzten 28 Tage); bei zu wenig Daten zählt er nicht. Liegt der 7-Tage-Trend am Ziel oder ist der Stichtag vorbei, wird die Gewohnheit archiviert. Den Namen passt du bei Bedarf oben selbst an.</p>
+      ${h && h.link === 'weightgoal' ? `<p class="faint small">Verknüpft mit deinem Gewicht: Ein Tag gilt als erfüllt, wenn dein 30-Tage-Ø auf oder unter der Soll-Linie liegt; unter ${C.GOAL.minDays} Wiegetagen in 30 Tagen zählt er nicht. Liegt der 7-Tage-Trend am Ziel oder ist der Stichtag vorbei, wird die Gewohnheit archiviert. Den Namen passt du bei Bedarf oben selbst an.</p>
       <div class="fields"><label class="f"><span>Zielgewicht (kg)</span><input type="text" inputmode="decimal" id="hGoalKg" value="${C.fmt(h.goal.kg)}"></label>
       <label class="f"><span>Stichtag</span><input type="date" id="hGoalDate" value="${h.goal.deadline}"></label></div>` : ''}
       ${h && h.link ? '' : `
@@ -1198,7 +1197,7 @@
     const chips = [m.phase === 1 ? `<span class="chip-b num">${m.left > 0 ? `noch ${C.fmt(m.left)} kg` : (m.rl ? `noch ${m.rl} Wiegetage` : 'Phase-Ziel erreicht')}${m.when ? ' · ' + m.when : ''}</span>` : `<span class="chip-b num">Puffer ${C.fmt(m.buffer)} kg</span>`,
       next !== undefined && next !== null ? `<span class="chip-b num">noch ${C.fmt(tr.kg - next)} kg bis ${C.fmtW(next)}</span>` : '',
       passed.length ? `<span class="chip-b num good">✓ ${C.fmtW(Math.min(...passed))} unterschritten</span>` : ''].join('');
-    const gh = goalHabit(), c = gh ? C.course(S.weights, gh.goal, d) : null, wd = C.weekdayDiff(S.weights, d);
+    const gh = goalHabit(), c = gh ? C.goalCourse(S.weights, gh, d) : null, wd = C.weekdayDiff(S.weights, d);
     const wdName = wd ? DAYS[C.parseDay(wd.d).getDay()] : '';
     const wdTxt = !wd ? '' : wd.d === d ? `gegenüber letztem ${wdName}: ${wd.diff === null ? 'keine Messung' : signed(wd.diff)}` : `${wdName}, ${dNum(wd.d).slice(0, 6)} gegenüber ${wdName} davor: ${wd.diff === null ? 'keine Messung' : signed(wd.diff)}`;
     const paceTxt = c ? courseTxt(c) : tp === null ? 'zu wenig Daten für eine Prognose' : `Aktuell ${kgWeek(tp)}`;
@@ -1207,6 +1206,7 @@
       <div class="ring-cap num">Ø 30 Tage ${C.fmt(ws.avg)} kg · ${m.phase === 1 ? `Phase 2 ab ${C.fmt(C.T.p1to3)} kg` : `Grenze ${C.fmt(C.T.relapse)} kg`}</div><div class="chips-b">${chips}</div></div>
       <div class="card course"><div class="row between"><span class="lbl">${gh ? `Kurs · ${C.fmtW(gh.goal.kg)} kg bis ${dNum(gh.goal.deadline)}` : 'Tempo · 28 Tage'}</span>${infoBtn('course')}</div>
       <p class="num ${courseCls(c)}" style="margin:6px 0 0;font-weight:600">${paceTxt}</p>
+      ${c && c.pace !== null ? `<p class="num muted" style="margin:6px 0 0">Tempo 28 Tage: ${kgWeek(c.pace)}</p>` : ''}
       ${wdTxt ? `<p class="num muted" style="margin:6px 0 0">${wdTxt}</p>` : ''}</div>
       <div class="entry-b"><input type="text" inputmode="decimal" placeholder="Gewicht, kg" id="wKg" aria-label="Gewicht in kg"><button class="iconbtn lg" data-act="toggleWhen" aria-label="Anderer Zeitpunkt">${CLOCK}</button><button class="fab" data-act="addWeight" aria-label="Gewicht speichern">${CHECK}</button></div>
       <input type="datetime-local" id="wWhen" hidden style="margin:-4px 0 12px" value="${C.nowLocal()}">
@@ -1422,7 +1422,7 @@
       <label class="srow" style="cursor:pointer;margin-top:8px"><span class="grow"><b>KFA-Altdaten zeigen</b><span class="faint small" style="display:block">geschätzt von der alten App</span></span><input type="checkbox" class="sw" ${showAltFat() ? 'checked' : ''} data-change="altFat" aria-label="Geschätzte KFA-Altdaten zeigen"></label></div>
       <div class="wlist">${row('dups', 'Mögliche Duplikate', `${C.altDuplicates(S.weights, setting('dupKeep', [])).filter(x => !x.kept).length} offen`)}</div>
       <p class="faint small" id="persist" style="margin:18px 0 4px">…</p>
-      <p class="faint small" style="margin:0">Dein Leben 2.11.0</p>`;
+      <p class="faint small" style="margin:0">Dein Leben 2.12.0</p>`;
   }
   const DEFAULTS = { dotShape: 'bar', dotLabel: 'none', heuteView: 'tiles', trainStart: 'ask', weightRange: 'auto', backupDays: 7, weighStale: 3 };
   const iconOf = k => `<span class="sn"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg></span>`;
@@ -1608,10 +1608,11 @@
     wstats: ['Statistik', () => `<p><b>Veränderung:</b> 30-Tage-Ø heute gegen den 30-Tage-Ø am Beginn des Zeitraums. Einzelwerte schwanken von Tag zu Tag zu stark für einen fairen Vergleich.</p>
       <p><b>Körperfett:</b> erste gegen letzte Messung im Zeitraum, deshalb erst ab zwei Messungen.</p>
       <p><b>Wiegungen:</b> pro Tag zählt die erste Messung.</p>`],
-    course: ['Kurs zum Ziel', () => `<p><b>Aktuell:</b> Gerade durch alle Messungen der letzten 28 Tage, in kg pro Woche. Unter 8 Messungen gibt es keine Prognose.</p>
-      <p><b>Nötig:</b> (Trend − Zielgewicht) geteilt durch die Wochen bis zum Stichtag.</p>
-      <p><b>Auf Kurs:</b> Du nimmst mindestens so schnell ab wie nötig. Sonst steht da, wie viele Wochen du beim jetzigen Tempo nach dem Stichtag ankämst.</p>
-      <p><b>Gewohnheit:</b> Die Gewichtsziel-Gewohnheit gilt an einem Tag als erfüllt, wenn du an diesem Tag auf Kurs warst. Bei zu wenig Daten zählt der Tag nicht.</p>`],
+    course: ['Kurs zum Ziel', () => { const gh = goalHabit(), l = gh ? C.goalLine(S.weights, gh) : null; return `<p><b>Soll-Linie:</b> gerade Linie vom 30-Tage-Ø am Beginn der automatischen Wertung zum Zielgewicht am Stichtag.${l && gh ? ` Bei dir: ${C.fmt(l.kg)} kg am ${dNum(l.d)} → ${C.fmt(gh.goal.kg)} kg am ${dNum(gh.goal.deadline)}.` : ''}</p>
+      <p><b>Auf Kurs:</b> Dein 30-Tage-Ø (erste Messung je Tag) liegt auf oder unter dem Soll des Tages. Sonst steht da, wie viel darüber.</p>
+      <p><b>Ziel erreicht:</b> zählt nach dem 7-Tage-Trend. Die große Zahl bleibt der 7-Tage-Trend.</p>
+      <p><b>Tempo:</b> Gerade durch alle Messungen der letzten 28 Tage, nur zur Info.</p>
+      <p><b>Gewohnheit:</b> Ein Tag gilt als erfüllt, wenn du an diesem Tag auf Kurs warst. Unter ${C.GOAL.minDays} Wiegetagen in 30 Tagen zählt er nicht.</p>`; }],
     measure: ['Taille und Navy-Methode', () => `<p>Taille auf Nabelhöhe messen, Hals knapp unter dem Kehlkopf. Die Taille allein reicht; mit Hals und Körpergröße kommt Körperfett dazu. Immer gleich messen, dann ist der Verlauf aussagekräftig.</p><p>Der Wert ist eine Schätzung mit einigen Prozentpunkten Unsicherheit.</p>`],
     pauses: ['Pausen', () => `<p>Pausierte Kategorien erscheinen in Einheiten markiert. Du beendest eine Pause selbst.</p>`],
     ring: ['Gewichtung', () => `<p><b>Schwierigkeit 1–5</b> legt fest, wie stark eine Gewohnheit den Wochenring füllt. Die Anteile ergeben zusammen immer 100 %.</p>
@@ -1737,7 +1738,7 @@
       if (!a || !wasWeekly || f.targetFrom === 'all') { h.target = newT; h.targets = []; }
       else if (C.targetAt(h, ws) !== newT) { h.targets = (h.targets || []).filter(x => x.from < ws); h.targets.push({ from: ws, target: newT }); }
     } else if (h.type !== 'weekly') { h.target = 1; h.targets = []; }
-    if (h.link === 'weightgoal') { h.goal = { kg: f.goalKg, deadline: f.goalDate }; if (!h.autoFrom) h.autoFrom = today(); }
+    if (h.link === 'weightgoal') { h.goal = { ...(h.goal || {}), kg: f.goalKg, deadline: f.goalDate }; if (!h.autoFrom) h.autoFrom = today(); }
     if (!a) S.habits.push(h);
     if (newFive && !a) { h.diff = 5; h.prob = { start5: h.start }; } else setDiff(h, f.diff);
     for (const n of C.checkGoals(S)) S.notices.push(n);

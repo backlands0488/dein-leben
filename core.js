@@ -194,45 +194,76 @@
     let sxy = 0, sxx = 0; for (const [x, y] of pts) { sxy += (x - mx) * (y - my); sxx += (x - mx) ** 2; }
     return { kgWeek: sxx ? (sxy / sxx) * 7 : null, n };
   }
-  // Kurs zum Gewichtsziel goal = { kg, deadline }.
-  // status: 'few' (zu wenig Daten) · 'reached' (Trend am Ziel) · 'late' (Stichtag vorbei) · 'on' (auf Kurs) · 'off' (Verzug)
-  function course(weights, goal, day = todayStr()) {
-    const tr = trendAt(weights, day), p = paceAt(weights, day);
-    const out = { trend: tr.kg, nTrend: tr.n, pace: p.kgWeek, nPace: p.n, need: null, weeksLeft: null, delayWeeks: null, reachDate: null };
-    if (!goal || typeof goal.kg !== 'number' || !goal.deadline) return { ...out, status: 'nogoal' };
-    if (tr.kg === null || p.kgWeek === null) return { ...out, status: 'few' };
-    if (tr.kg <= goal.kg) return { ...out, status: 'reached' };
-    const daysLeft = diffDays(day, goal.deadline);
-    if (daysLeft <= 0) return { ...out, status: 'late' };
-    out.weeksLeft = daysLeft / 7;
-    out.need = -(tr.kg - goal.kg) / out.weeksLeft;
-    if (p.kgWeek < 0) {
-      const reachWeeks = (tr.kg - goal.kg) / -p.kgWeek;
-      out.reachDate = addDays(day, Math.round(reachWeeks * 7));
-      out.delayWeeks = reachWeeks - out.weeksLeft;
-    }
-    return { ...out, status: p.kgWeek <= out.need ? 'on' : 'off' };
+  // ---------- Kurs zum Gewichtsziel (ab 2.12.0: 30-Tage-Ø gegen Soll-Linie) ----------
+  // 30-Tage-Ø = Mittel der ersten Messung je Tag der letzten 30 Kalendertage (wie „Ø 30 Tage“ im Gewichts-Tab);
+  // gewertet erst ab GOAL.minDays Wiegetagen im Fenster.
+  const GOAL = { minDays: 8 };
+  function avg30At(weights, day = todayStr()) {
+    const from = addDays(day, -29);
+    const xs = dailyFirst(sortW(weights).filter(w => wDay(w) >= from && wDay(w) <= day));
+    return { kg: xs.length >= GOAL.minDays ? xs.reduce((a, x) => a + x.kg, 0) / xs.length : null, n: xs.length };
   }
-  // Gewichtsziel-Gewohnheit: ab h.autoFrom gilt ein Tag als erfüllt, wenn der Kurs an diesem Tag „auf Kurs“ (oder Ziel erreicht) war;
+  // Soll-Linie: vom 30-Tage-Ø am Beginn der automatischen Wertung (h.autoFrom; bei zu wenig Daten am ersten Tag danach
+  // mit genug Daten) gerade zum Zielgewicht am Stichtag. Einmal gefunden, wird sie in h.goal.line festgehalten.
+  function goalLine(weights, h, today = todayStr()) {
+    if (!h || !h.goal) return null;
+    if (h.goal.line && h.goal.line.d && typeof h.goal.line.kg === 'number') return h.goal.line;
+    if (!h.autoFrom) return null;
+    const end = today < h.goal.deadline ? today : h.goal.deadline;
+    for (const d of dayRange(h.autoFrom, end)) { const a = avg30At(weights, d); if (a.kg !== null) return { d, kg: Math.round(a.kg * 100) / 100 }; }
+    return null;
+  }
+  const sollAt = (line, goal, day) => {
+    const span = diffDays(line.d, goal.deadline);
+    if (span <= 0) return goal.kg;
+    const f = Math.min(1, Math.max(0, diffDays(line.d, day) / span));
+    return line.kg + (goal.kg - line.kg) * f;
+  };
+  // goal = { kg, deadline, line? }
+  // status: 'few' (zu wenig Daten bzw. noch keine Linie) · 'reached' (7-Tage-Trend am Ziel) · 'late' (Stichtag vorbei)
+  //         · 'on' (30-Tage-Ø auf/unter der Soll-Linie) · 'off' (darüber)
+  // Tempo (Regression 28 Tage) wird nur noch als Zusatzinfo mitgeliefert.
+  function course(weights, goal, day = todayStr()) {
+    const tr = trendAt(weights, day), p = paceAt(weights, day), a = avg30At(weights, day);
+    const line = goal && goal.line || null;
+    const out = { trend: tr.kg, nTrend: tr.n, pace: p.kgWeek, nPace: p.n, avg: a.kg, nAvg: a.n, line, soll: null, diff: null };
+    if (!goal || typeof goal.kg !== 'number' || !goal.deadline) return { ...out, status: 'nogoal' };
+    if (tr.kg !== null && tr.kg <= goal.kg) return { ...out, status: 'reached' };
+    if (diffDays(day, goal.deadline) <= 0) return { ...out, status: 'late' };
+    if (!line || day < line.d || a.kg === null) return { ...out, status: 'few' };
+    out.soll = sollAt(line, goal, day);
+    out.diff = a.kg - out.soll;
+    return { ...out, status: out.diff <= 1e-9 ? 'on' : 'off' };
+  }
+  // Kurs für eine Gewichtsziel-Gewohnheit (Linie wird bei Bedarf aus den Daten bestimmt)
+  const goalCourse = (weights, h, day = todayStr()) => course(weights, h && h.goal ? { ...h.goal, line: goalLine(weights, h, day) } : null, day);
+  // Gewichtsziel-Gewohnheit: ab h.autoFrom gilt ein Tag als erfüllt, wenn der 30-Tage-Ø an diesem Tag auf/unter der Soll-Linie lag
+  // (oder der 7-Tage-Trend am Ziel war); ab 2.12.0 rückwirkend für alle automatisch gewerteten Tage;
   // bei zu wenig Daten ist der Tag neutral (wie ein Urlaubstag). Gespeicherte Häkchen vor autoFrom bleiben unverändert und zählen weiter.
   const autoGoal = h => !!(h && h.link === 'weightgoal' && h.goal && h.autoFrom);
   let goalMemo = { k: null, v: null };
   function goalDays(state, h, today = todayStr()) {
     const ws = state.weights || [];
-    const k = `${h.id}|${h.autoFrom}|${h.goal.kg}|${h.goal.deadline}|${h.start}|${today}|${ws.length}|${ws.reduce((a, w) => a + (w.kg || 0), 0)}`;
+    const line = goalLine(ws, h, today);
+    const k = `${h.id}|${h.autoFrom}|${h.goal.kg}|${h.goal.deadline}|${h.start}|${today}|${ws.length}|${ws.reduce((a, w) => a + (w.kg || 0), 0)}|${line ? line.d + line.kg : '-'}`;
     if (goalMemo.k === k) return goalMemo.v;
     const on = new Set(), few = new Set(), from = h.autoFrom > h.start ? h.autoFrom : h.start;
-    const end = today < h.goal.deadline ? today : h.goal.deadline;
+    const end = today < h.goal.deadline ? today : h.goal.deadline, g = { ...h.goal, line };
     for (const d of dayRange(from, end)) {
-      const c = course(ws, h.goal, d);
+      const c = course(ws, g, d);
       if (c.status === 'on' || c.status === 'reached') on.add(d); else if (c.status === 'few') few.add(d);
     }
     goalMemo = { k, v: { on, few } };
     return goalMemo.v;
   }
   // Neue Gewichtsziel-Gewohnheiten und bestehende beim ersten Laden: Stichtag für die automatische Wertung setzen (nur ergänzen)
+  // Soll-Linie festhalten, sobald sie bestimmbar ist (danach verschiebt sie sich nicht mehr durch spätere Korrekturen)
   function migrateGoalAuto(s, today = todayStr()) {
-    for (const h of s.habits) if (h.link === 'weightgoal' && h.goal && !h.autoFrom) h.autoFrom = today;
+    for (const h of s.habits) {
+      if (h.link !== 'weightgoal' || !h.goal) continue;
+      if (!h.autoFrom) h.autoFrom = today;
+      if (!h.goal.line) { const l = goalLine(s.weights || [], h, today); if (l) h.goal.line = l; }
+    }
   }
   // Gleicher Wochentag der Vorwoche: erste Messung heute (bzw. am Tag der letzten Messung) gegen erste Messung 7 Tage davor
   function weekdayDiff(weights, day = todayStr()) {
@@ -1171,7 +1202,7 @@ mob-unter|Mobility – Unterkörper|mobil||sonst|done|Reha|Mobilität,Beine`;
     PROG, LOADED, progable, perfKey, PERF_UNIT, stepDefault, progDefaultOn, workSets, progHist, progDerive, progStd, progCfg, settleProg, progFor, backLoad, stepUp, stepDown,
     VAC_BACK, vacSet, vacAt, setVac, offDays, vacOn, weekOff, vacCheck, winFrom, minEnd, hardFrom,
     LETTERS, tplOf, rotTemplates, tplLetter, rotation, tplLast, filled, tplDiff, tplApply, capLimit,
-    TREND, trendAt, trendNear, trendSeries, paceAt, course, autoGoal, goalDays, migrateGoalAuto, weekdayDiff, lastWeighDay, wKey, altDuplicates, isAltFat, fatPoints, sessDur, markStart
+    TREND, trendAt, trendNear, trendSeries, paceAt, course, GOAL, avg30At, goalLine, goalCourse, autoGoal, goalDays, migrateGoalAuto, weekdayDiff, lastWeighDay, wKey, altDuplicates, isAltFat, fatPoints, sessDur, markStart
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
 })(typeof self !== 'undefined' ? self : this);
