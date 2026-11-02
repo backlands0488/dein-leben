@@ -446,6 +446,8 @@ h2.exh{margin:20px 0 2px;font-size:var(--f-m)}
 .radar{width:100%;max-width:400px;height:auto;display:block;margin:0 auto}
 .legend{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;font-size:var(--f-xs);color:var(--mu);margin:6px 0 0}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+.legend i.ln{width:16px;height:0;border-radius:0;border-top:2.5px solid;vertical-align:3px}
+.legend i.ln.dash{border-top-style:dashed}
 .mbars{display:flex;flex-direction:column;gap:9px}
 .mbar{display:grid;grid-template-columns:112px 1fr 36px;align-items:center;gap:10px;font-size:var(--f-s)}
 .mbar i{height:10px;border-radius:5px;background:var(--s2);overflow:hidden}

@@ -56,6 +56,8 @@
   // Ab so vielen Tagen ohne Messung wird „gewogen vor X Tagen“ auf „Heute“ hervorgehoben (nur Anzeige, keine Benachrichtigung)
   const weighStale = () => { const v = Number(setting('weighStale', 3)); return SETTABLE.weighStale.includes(v) ? v : 3; };
   const showAltFat = () => setting('showAltFat', false) === true;
+  // Soll-Linie und 30-Tage-Ø im Gewichtsdiagramm (ab 2.13.0, standardmäßig an)
+  const showSoll = () => setting('chartSoll', true) !== false;
   const goalHabit = () => S.habits.find(h => !h.archived && h.link === 'weightgoal' && h.goal) || null;
   const kgWeek = v => `${v < -0.004 ? '−' : v > 0.004 ? '+' : '±'}${C.fmt(Math.abs(v), 2)} kg/Woche`;
   // Kurs als eine Zeile: „Ø 30 Tage 110,4 · Soll 110,6 kg · auf Kurs“ (ab 2.12.0: 30-Tage-Ø gegen Soll-Linie)
@@ -1251,7 +1253,15 @@
     const pts = [...S.weights].filter(w => w.t.slice(0, 10) >= from && w.t.slice(0, 10) <= d).map(w => ({ d: w.t.slice(0, 10), kg: w.kg }));
     const avg = C.trendSeries(S.weights, from < ws.daily[0].d ? ws.daily[0].d : from, d);
     const trNow = C.trendAt(S.weights, d).kg;
-    const vals = pts.map(p => p.kg).concat(avg.filter(a => a.kg !== null).map(a => a.kg));
+    // Soll-Linie der Gewichtsziel-Gewohnheit und 30-Tage-Ø (danach wird gewertet), beide ab Beginn der Linie
+    const gh = showSoll() ? goalHabit() : null, gl = gh ? C.goalLine(S.weights, gh, d) : null;
+    const sFrom = gl ? (gl.d > from ? gl.d : from) : null, soll = [], a30 = [];
+    if (gl && sFrom <= d) {
+      const sAt = day => gl.kg + (gh.goal.kg - gl.kg) * Math.min(1, Math.max(0, C.diffDays(gl.d, day) / Math.max(1, C.diffDays(gl.d, gh.goal.deadline))));
+      soll.push({ d: sFrom, kg: sAt(sFrom) }, { d, kg: sAt(d) });
+      for (const day of C.dayRange(sFrom, d)) a30.push({ d: day, kg: C.avg30At(S.weights, day).kg });
+    }
+    const vals = pts.map(p => p.kg).concat(avg.filter(a => a.kg !== null).map(a => a.kg), soll.map(s => s.kg), a30.filter(a => a.kg !== null).map(a => a.kg));
     if (!vals.length) return '<p class="muted">Keine Werte in diesem Zeitraum.</p>';
     let lo = Math.floor(Math.min(...vals) - 1), hi = Math.ceil(Math.max(...vals) + 1);
     const W = 400, H = 220, L = 30, R = 6, Tp = 8, B = 22;
@@ -1270,9 +1280,11 @@
     if (span <= 31) { for (let k = 0; k <= 4; k++) { const dd = C.addDays(from, Math.round(span * k / 4)); g += `<text x="${X(dd)}" y="${H - 6}" font-size="11" style="fill:var(--fa)" text-anchor="${k === 0 ? 'start' : k === 4 ? 'end' : 'middle'}">${Number(dd.slice(8))}.${Number(dd.slice(5, 7))}.</text>`; } mk = '9999'; }
     while (mk <= d) { const x = X(mk); if (x - lastLabel > 46) { g += `<text x="${x}" y="${H - 6}" font-size="11" style="fill:var(--fa)" text-anchor="middle">${MONTHS[Number(mk.slice(5, 7)) - 1].slice(0, 3)}${mk.slice(5, 7) === '01' ? ' ' + mk.slice(2, 4) : ''}</text>`; lastLabel = x; } mk = C.monthStart(C.addDays(C.monthEnd(mk), 1)); }
     const dots = pts.map(p => `<circle cx="${X(p.d).toFixed(1)}" cy="${Y(p.kg).toFixed(1)}" r="${pts.length > 150 ? 1.4 : 2.2}" style="fill:var(--fa)" fill-opacity=".4"/>`).join('');
-    let line = '', pen = false;
-    for (const a of avg) { if (a.kg === null) { pen = false; continue; } line += `${pen ? 'L' : 'M'}${X(a.d).toFixed(1)},${Y(a.kg).toFixed(1)}`; pen = true; }
-    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Gewichtsverlauf">${g}${dots}<path d="${line}" fill="none" style="stroke:var(--sage)" stroke-width="2.5" stroke-linejoin="round"/></svg>`;
+    const path = ser => { let p = '', pen = false; for (const a of ser) { if (a.kg === null) { pen = false; continue; } p += `${pen ? 'L' : 'M'}${X(a.d).toFixed(1)},${Y(a.kg).toFixed(1)}`; pen = true; } return p; };
+    const line = path(avg);
+    const extra = soll.length ? `<path d="${path(a30)}" fill="none" style="stroke:var(--umber)" stroke-width="1.6" stroke-linejoin="round"/><path d="${path(soll)}" fill="none" style="stroke:var(--umber)" stroke-width="1.6" stroke-dasharray="5 4"/>` : '';
+    const legend = soll.length ? `<div class="legend"><span><i class="ln" style="border-color:var(--sage)"></i>Trend 7 Tage</span><span><i class="ln" style="border-color:var(--umber)"></i>Ø 30 Tage</span><span><i class="ln dash" style="border-color:var(--umber)"></i>Soll</span></div>` : '';
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Gewichtsverlauf${soll.length ? ' mit 30-Tage-Ø und Soll-Linie' : ''}">${g}${dots}${extra}<path d="${line}" fill="none" style="stroke:var(--sage)" stroke-width="2.5" stroke-linejoin="round"/></svg>${legend}`;
   }
   // ---------- Körperwerte und Statistik ----------
   const rangeSeg = (cur, act) => `<div class="seg wide rng">${RANGES.map(r => `<button aria-pressed="${cur === r}" data-act="${act}" data-arg="${r}">${r}</button>`).join('')}</div>`;
@@ -1419,10 +1431,11 @@
       <div class="opt"><label class="lbl" for="wLines">Markierungen in kg</label><input type="text" id="wLines" inputmode="decimal" value="${weightLines().map(C.fmtW).join(' ')}" data-change="weightLines" placeholder="z. B. 99 92 88"></div>
       <div class="opt"><label class="lbl" for="hCm">Körpergröße in cm</label><input type="text" id="hCm" inputmode="decimal" value="${S.settings.heightCm || ''}" data-change="height" placeholder="cm"></div>
       ${set('„Gewogen vor …“ hervorheben ab Tagen', seg('weighStale', SETTABLE.weighStale.map(v => [v, v])))}
-      <label class="srow" style="cursor:pointer;margin-top:8px"><span class="grow"><b>KFA-Altdaten zeigen</b><span class="faint small" style="display:block">geschätzt von der alten App</span></span><input type="checkbox" class="sw" ${showAltFat() ? 'checked' : ''} data-change="altFat" aria-label="Geschätzte KFA-Altdaten zeigen"></label></div>
+      <label class="srow" style="cursor:pointer;margin-top:8px"><span class="grow"><b>KFA-Altdaten zeigen</b><span class="faint small" style="display:block">geschätzt von der alten App</span></span><input type="checkbox" class="sw" ${showAltFat() ? 'checked' : ''} data-change="altFat" aria-label="Geschätzte KFA-Altdaten zeigen"></label>
+      <label class="srow" style="cursor:pointer;margin-top:8px"><span class="grow"><b>Soll-Linie im Diagramm</b><span class="faint small" style="display:block">mit 30-Tage-Ø, ab Beginn der Linie</span></span><input type="checkbox" class="sw" ${showSoll() ? 'checked' : ''} data-change="chartSoll" aria-label="Soll-Linie und 30-Tage-Ø im Diagramm zeigen"></label></div>
       <div class="wlist">${row('dups', 'Mögliche Duplikate', `${C.altDuplicates(S.weights, setting('dupKeep', [])).filter(x => !x.kept).length} offen`)}</div>
       <p class="faint small" id="persist" style="margin:18px 0 4px">…</p>
-      <p class="faint small" style="margin:0">Dein Leben 2.12.0</p>`;
+      <p class="faint small" style="margin:0">Dein Leben 2.13.0</p>`;
   }
   const DEFAULTS = { dotShape: 'bar', dotLabel: 'none', heuteView: 'tiles', trainStart: 'ask', weightRange: 'auto', backupDays: 7, weighStale: 3 };
   const iconOf = k => `<span class="sn"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg></span>`;
@@ -2097,6 +2110,7 @@
       toast(S.settings.weightLines.length ? `Markierungen: ${S.settings.weightLines.map(C.fmtW).join(' · ')} kg` : 'Keine Markierungen');
     },
     altFat: el => { S.settings.showAltFat = el.checked; save(); render(); },
+    chartSoll: el => { S.settings.chartSoll = el.checked; save(); render(); },
     height: el => { const v = C.num(el.value); S.settings.heightCm = v; save(); toast(v ? `Körpergröße ${C.fmt(v, 0)} cm` : 'Körpergröße entfernt'); }
   };
 
