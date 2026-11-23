@@ -167,6 +167,8 @@
     const ps = document.getElementById('persist');
     if (ps && navigator.storage && navigator.storage.persisted) navigator.storage.persisted().then(p => { ps.textContent = p ? 'Speicher dauerhaft ✓' : 'Speicher nicht dauerhaft bestätigt · Backups wichtig'; });
     else if (ps) ps.textContent = '';
+    const pm = document.getElementById('persistMini');
+    if (pm && navigator.storage && navigator.storage.persisted) navigator.storage.persisted().then(p => { pm.textContent = p ? '' : '· Speicher nicht dauerhaft'; });
   }
   // Seiten nebeneinander mit nativem Scroll-Einrasten: folgt dem Finger, flüssig wie eine native App
   function saveScroll() {
@@ -1403,39 +1405,81 @@
   }
 
   // ===== MEHR =====
+  // ===== MEHR (ab 2.14.0): Übersicht nach Android-Einstellungsrichtlinien – Gruppen, je Zeile Titel + aktueller Wert,
+  // Details auf Unterseiten; Auswahl mit mehr als 5 Möglichkeiten als Chips statt Segmentleiste
+  const SICONS = {
+    backup: '<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14"/>',
+    habits: '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.2l2.4 2.4 4.6-4.8"/>',
+    ring: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 8 8"/><circle cx="12" cy="12" r="3.5"/>',
+    training: '<path d="M3.5 9.5v5M6.5 7v10M17.5 7v10M20.5 9.5v5M6.5 12h11"/>',
+    gewicht: '<rect x="4" y="4" width="16" height="16" rx="4.5"/><path d="M8.6 10a4.2 4.2 0 0 1 6.8 0M12 12.2l1.4-2.2"/>',
+    look: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17M12 3.5a8.5 8.5 0 0 1 0 17" fill="currentColor"/>',
+    heute: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>',
+    tabs: '<rect x="3.5" y="5" width="17" height="14" rx="3"/><path d="M3.5 15h17M9.2 15v4M14.8 15v4"/>'
+  };
+  const sic = k => `<span class="sn"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SICONS[k]}</svg></span>`;
+  // Zeile: Symbol, Titel, aktueller Wert darunter, Pfeil
+  const mrow = (arg, ic, title, sub, warn) => `<button class="srow" data-act="open" data-arg="${arg}">${sic(ic)}<span class="grow" style="min-width:0"><b>${title}</b><span class="ssub ${warn ? 'warn' : ''}">${sub}</span></span><span class="chev">›</span></button>`;
+  const backupAgo = () => { const ago = S.lastBackup ? C.diffDays(S.lastBackup.slice(0, 10), today()) : null; return ago === null ? 'noch nie' : ago === 0 ? 'heute' : ago === 1 ? 'gestern' : `vor ${ago} Tagen`; };
+  const RANGE_LABELS = { auto: 'Automatisch', '7T': '7 Tage', '1M': '1 Monat', '3M': '3 Monate', '6M': '6 Monate', '1J': '1 Jahr', Alles: 'Alles' };
   function viewMehr() {
-    const ago = S.lastBackup ? C.diffDays(S.lastBackup.slice(0, 10), today()) : null;
-    const agoTxt = ago === null ? 'noch nie' : ago === 0 ? 'heute' : ago === 1 ? 'gestern' : `vor ${ago} Tagen`;
-    const row = (arg, l, v) => `<button class="srow" data-act="open" data-arg="${arg}"><span class="grow"><b>${l}</b></span><span class="muted num">${v}</span><span class="chev">›</span></button>`;
-    const seg = (key, opts) => `<div class="seg wide">${opts.map(([k, l]) => `<button aria-pressed="${String(setting(key, DEFAULTS[key])) === String(k)}" data-act="setting" data-arg="${key}:${k}">${l}</button>`).join('')}</div>`;
-    const set = (label, inner) => `<div class="opt"><span class="lbl">${label}</span>${inner}</div>`;
-    const acc = ACCENTS[S.settings.accent] ? S.settings.accent : 'mint';
     const act = activeHabits(), nIn = act.filter(inRing).length, hidN = tabHidden().length;
+    const acc = ACCENTS[S.settings.accent] ? S.settings.accent : 'mint', th = (THEMES.find(t => t[0] === (S.settings.theme || 'dark')) || THEMES[2])[1];
+    const vac = vacLabel(), due = !S.lastBackup || C.diffDays(S.lastBackup.slice(0, 10), today()) >= backupDays(), wl = weightLines().length;
+    const dupN = C.altDuplicates(S.weights, setting('dupKeep', [])).filter(x => !x.kept).length;
+    const tStart = { ask: 'Fragen', repeat: 'Wie zuletzt', empty: 'Leer' }[setting('trainStart', DEFAULTS.trainStart)];
     return `<div class="ph"><h1>Mehr</h1></div>
-      <div class="card"><div class="row between"><span class="lbl">Backup</span>${infoBtn('backup')}</div>
-      <div class="hero-num num" style="margin:2px 0 14px">${agoTxt}${S.lastBackup ? ` <span class="faint small" style="font-weight:500">${dNum(S.lastBackup)}</span>` : ''}</div>
-      <button class="btn primary block" data-act="backup">Jetzt sichern</button>
-      <div class="duo" style="margin-top:10px">${navigator.canShare ? '<button class="btn block" data-act="shareBackup">Teilen</button>' : ''}<label class="btn ghost block" style="display:grid;place-items:center${navigator.canShare ? '' : ';grid-column:1 / -1'}">Wiederherstellen<input type="file" accept=".json,application/json" data-change="restore" hidden></label></div>
-      ${set('Automatisch alle … Tage', seg('backupDays', SETTABLE.backupDays.map(v => [v, v])))}</div>
-      <div class="lbl mon">Verwalten</div>
-      <div class="wlist">${row('habits', 'Gewohnheiten', act.length)}${row('exercises', 'Übungen', S.exercises.length)}${row('equip', 'Geräte', `${equipOn().length} von ${Object.keys(C.EQUIP).length}`)}${row('cats', 'Kategorien', cats().length)}${row('pauses', 'Pausen', `${S.pauses.filter(p => !p.to).length} aktiv`)}</div>
+      <div class="lbl mon" style="margin-top:4px">Daten</div>
+      <div class="wlist">${mrow('backup', 'backup', 'Backup', `${backupAgo()} · alle ${backupDays()} Tage <span id="persistMini"></span>`, due)}</div>
+      <div class="lbl mon">Gewohnheiten</div>
+      <div class="wlist">${mrow('habits', 'habits', 'Gewohnheiten', `${act.length} von ${C.HARD.maxActive} aktiv${vac ? ` · Urlaub ${vac}` : ''}`)}${mrow('ring', 'ring', 'Wochenring', `${nIn} von ${act.length} Gewohnheiten`)}</div>
+      <div class="lbl mon">Training & Gewicht</div>
+      <div class="wlist">${mrow('setTraining', 'training', 'Training', `${S.exercises.length} Übungen · ${equipOn().length} Geräte · Start: ${tStart}`)}${mrow('setWeight', 'gewicht', 'Gewicht', `${S.settings.heightCm ? C.fmt(S.settings.heightCm, 0) + ' cm' : 'Größe fehlt'} · ${wl} ${wl === 1 ? 'Markierung' : 'Markierungen'}${dupN ? ` · ${dupN} Duplikate` : ''}`, !S.settings.heightCm || dupN)}</div>
       <div class="lbl mon">Darstellung</div>
-      <div class="seg wide">${THEMES.map(([k, l]) => `<button aria-pressed="${(S.settings.theme || 'dark') === k}" data-act="theme" data-arg="${k}">${l}</button>`).join('')}</div>
+      <div class="wlist">${mrow('look', 'look', 'Farben', `${th} · ${ACCENTS[acc][0]}`)}${mrow('heuteLook', 'heute', '„Heute“ gestalten', VIEW_LABELS[setting('heuteView', 'tiles')] || 'Kacheln')}${mrow('tabOrder', 'tabs', 'Seiten', `Start: ${TAB_LABELS[tabOrder()[0]]}${hidN ? ` · ${hidN} ausgeblendet` : ''}`)}</div>
+      <p class="faint small" style="margin:18px 4px 0">Dein Leben 2.14.0</p>`;
+  }
+  const stSeg = (key, opts) => `<div class="seg wide">${opts.map(([k, l]) => `<button aria-pressed="${String(setting(key, DEFAULTS[key])) === String(k)}" data-act="setting" data-arg="${key}:${k}">${l}</button>`).join('')}</div>`;
+  const stChips = (key, opts) => `<div class="chips wrap" role="radiogroup">${opts.map(([k, l]) => `<button class="chip" role="radio" aria-checked="${String(setting(key, DEFAULTS[key])) === String(k)}" aria-pressed="${String(setting(key, DEFAULTS[key])) === String(k)}" data-act="setting" data-arg="${key}:${k}">${l}</button>`).join('')}</div>`;
+  const stOpt = (label, inner) => `<div class="opt"><span class="lbl">${label}</span>${inner}</div>`;
+  function screenBackup() {
+    return `${header('Backup', infoBtn('backup'))}
+      <div class="card"><span class="lbl">Letztes Backup</span>
+      <div class="hero-num num" style="margin:2px 0 14px">${backupAgo()}${S.lastBackup ? ` <span class="faint small" style="font-weight:500">${dNum(S.lastBackup)}</span>` : ''}</div>
+      <button class="btn primary block" data-act="backup">Jetzt sichern</button>
+      ${navigator.canShare ? '<div style="height:10px"></div><button class="btn block" data-act="shareBackup">Teilen</button>' : ''}</div>
+      <div class="card">${stOpt('Automatisch alle … Tage', stSeg('backupDays', SETTABLE.backupDays.map(v => [v, v])))}
+      <p class="faint small" id="persist" style="margin:14px 0 0">…</p></div>
+      <div class="lbl mon">Wiederherstellen</div>
+      <div class="card"><p class="faint small" style="margin:0 0 12px">Ersetzt alle Daten in der App durch die gewählte Datei.</p>
+      <label class="btn ghost block" style="display:grid;place-items:center">Datei wählen<input type="file" accept=".json,application/json" data-change="restore" hidden></label></div>`;
+  }
+  function screenSetTraining() {
+    const row = (arg, l, v) => `<button class="srow" data-act="open" data-arg="${arg}"><b class="grow">${l}</b><span class="muted num">${v}</span><span class="chev">›</span></button>`;
+    return `${header('Training')}
+      <div class="wlist">${row('exercises', 'Übungen', S.exercises.length)}${row('equip', 'Geräte', `${equipOn().length} von ${Object.keys(C.EQUIP).length}`)}${row('cats', 'Kategorien', cats().length)}${row('pauses', 'Pausen', `${S.pauses.filter(p => !p.to).length} aktiv`)}</div>
+      <div class="card" style="margin-top:12px">${stOpt('„Einheit starten“', stSeg('trainStart', [['ask', 'Fragen'], ['repeat', 'Wie zuletzt'], ['empty', 'Leer']]))}</div>`;
+  }
+  function screenSetWeight() {
+    const dupN = C.altDuplicates(S.weights, setting('dupKeep', [])).filter(x => !x.kept).length;
+    const sw = (ch, on, l, sub, al) => `<label class="srow" style="cursor:pointer"><span class="grow"><b>${l}</b><span class="ssub">${sub}</span></span><input type="checkbox" class="sw" ${on ? 'checked' : ''} data-change="${ch}" aria-label="${al}"></label>`;
+    return `${header('Gewicht')}
+      <div class="card"><div class="opt"><label class="lbl" for="hCm">Körpergröße in cm</label><input type="text" id="hCm" inputmode="decimal" value="${S.settings.heightCm || ''}" data-change="height" placeholder="cm"></div>
+      <div class="opt"><label class="lbl" for="wLines">Markierungen in kg</label><input type="text" id="wLines" inputmode="decimal" value="${weightLines().map(C.fmtW).join(' ')}" data-change="weightLines" placeholder="z. B. 99 92 88"></div></div>
+      <div class="lbl mon">Diagramm</div>
+      <div class="card">${stOpt('Zeitraum beim Öffnen', stChips('weightRange', [['auto', 'Automatisch'], ...RANGES.map(r => [r, RANGE_LABELS[r]])]))}</div>
+      <div class="wlist" style="margin-top:12px">${sw('chartSoll', showSoll(), 'Soll-Linie', 'mit 30-Tage-Ø, ab Beginn der Linie', 'Soll-Linie und 30-Tage-Ø im Diagramm zeigen')}${sw('altFat', showAltFat(), 'KFA-Altdaten', 'geschätzt von der alten App', 'Geschätzte KFA-Altdaten zeigen')}</div>
+      <div class="lbl mon">Auf „Heute“</div>
+      <div class="card">${stOpt('„Gewogen vor …“ hervorheben ab Tagen', stSeg('weighStale', SETTABLE.weighStale.map(v => [v, v])))}</div>
+      <div class="lbl mon">Daten</div>
+      <div class="wlist"><button class="srow" data-act="open" data-arg="dups"><b class="grow">Mögliche Duplikate</b><span class="muted num">${dupN} offen</span><span class="chev">›</span></button></div>`;
+  }
+  function screenLook() {
+    const acc = ACCENTS[S.settings.accent] ? S.settings.accent : 'mint';
+    return `${header('Farben')}
+      <div class="card">${stOpt('Farbschema', `<div class="seg wide">${THEMES.map(([k, l]) => `<button aria-pressed="${(S.settings.theme || 'dark') === k}" data-act="theme" data-arg="${k}">${l}</button>`).join('')}</div>`)}</div>
       <div class="card accents"><div class="row between"><span class="lbl">Akzentfarbe</span><span class="muted small">${ACCENTS[acc][0]}</span></div>
-      <div class="swatches">${Object.entries(ACCENTS).map(([k, v]) => `<button class="swatch" style="background:${v[1]}" aria-pressed="${k === acc}" data-act="accent" data-arg="${k}" aria-label="Akzentfarbe ${v[0]}">${k === acc ? CHECK : ''}</button>`).join('')}</div></div>
-      <div class="wlist">${row('heuteLook', '„Heute“ gestalten', VIEW_LABELS[setting('heuteView', 'tiles')] || 'Kacheln')}${row('tabOrder', 'Seiten', `Start: ${TAB_LABELS[tabOrder()[0]]}${hidN ? ` · ${hidN} aus` : ''}`)}${row('ring', 'Wochenring', `${nIn} von ${act.length}`)}</div>
-      <div class="lbl mon">Training</div>
-      <div class="card">${set('„Einheit starten“', seg('trainStart', [['ask', 'Fragen'], ['repeat', 'Wie zuletzt'], ['empty', 'Leer']]))}</div>
-      <div class="lbl mon">Gewicht</div>
-      <div class="card">${set('Diagramm zeigt zuerst', seg('weightRange', [['auto', 'Auto'], ...RANGES.map(r => [r, r])]))}
-      <div class="opt"><label class="lbl" for="wLines">Markierungen in kg</label><input type="text" id="wLines" inputmode="decimal" value="${weightLines().map(C.fmtW).join(' ')}" data-change="weightLines" placeholder="z. B. 99 92 88"></div>
-      <div class="opt"><label class="lbl" for="hCm">Körpergröße in cm</label><input type="text" id="hCm" inputmode="decimal" value="${S.settings.heightCm || ''}" data-change="height" placeholder="cm"></div>
-      ${set('„Gewogen vor …“ hervorheben ab Tagen', seg('weighStale', SETTABLE.weighStale.map(v => [v, v])))}
-      <label class="srow" style="cursor:pointer;margin-top:8px"><span class="grow"><b>KFA-Altdaten zeigen</b><span class="faint small" style="display:block">geschätzt von der alten App</span></span><input type="checkbox" class="sw" ${showAltFat() ? 'checked' : ''} data-change="altFat" aria-label="Geschätzte KFA-Altdaten zeigen"></label>
-      <label class="srow" style="cursor:pointer;margin-top:8px"><span class="grow"><b>Soll-Linie im Diagramm</b><span class="faint small" style="display:block">mit 30-Tage-Ø, ab Beginn der Linie</span></span><input type="checkbox" class="sw" ${showSoll() ? 'checked' : ''} data-change="chartSoll" aria-label="Soll-Linie und 30-Tage-Ø im Diagramm zeigen"></label></div>
-      <div class="wlist">${row('dups', 'Mögliche Duplikate', `${C.altDuplicates(S.weights, setting('dupKeep', [])).filter(x => !x.kept).length} offen`)}</div>
-      <p class="faint small" id="persist" style="margin:18px 0 4px">…</p>
-      <p class="faint small" style="margin:0">Dein Leben 2.13.1</p>`;
+      <div class="swatches">${Object.entries(ACCENTS).map(([k, v]) => `<button class="swatch" style="background:${v[1]}" aria-pressed="${k === acc}" data-act="accent" data-arg="${k}" aria-label="Akzentfarbe ${v[0]}">${k === acc ? CHECK : ''}</button>`).join('')}</div></div>`;
   }
   const DEFAULTS = { dotShape: 'bar', dotLabel: 'none', heuteView: 'tiles', trainStart: 'ask', weightRange: 'auto', backupDays: 7, weighStale: 3 };
   const iconOf = k => `<span class="sn"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg></span>`;
@@ -1603,7 +1647,7 @@
   function logGoal(year, action, title, reason) { S.goalLog.push({ t: C.nowLocal(), year: String(year), action, title, reason: reason || '' }); }
 
   const TABS = { heute: viewHeute, ziele: viewZiele, training: viewTraining, gewicht: viewGewicht, mehr: viewMehr };
-  const SCREENS = { templates: screenTemplates, tplEdit: screenTplEdit, tplArchive: screenTplArchive, vacations: screenVacations, stats: screenStats, month: screenMonth, equip: screenEquip, tabOrder: screenTabOrder, ring: screenRing, cats: screenCats, catEdit: screenCatEdit, habit: screenHabit, habitEdit: screenHabitEdit, session: screenSession, move: screenMove, exercises: screenExercises, exEdit: screenExEdit, pauses: screenPauses, weights: screenWeights, dups: screenDups, measure: screenMeasure, heuteLook: screenHeuteLook, body: screenBody, wstats: screenWStats, habits: screenHabits, goalEdit: screenGoalEdit, progress: screenProgress, exStats: screenExStats };
+  const SCREENS = { backup: screenBackup, setTraining: screenSetTraining, setWeight: screenSetWeight, look: screenLook, templates: screenTemplates, tplEdit: screenTplEdit, tplArchive: screenTplArchive, vacations: screenVacations, stats: screenStats, month: screenMonth, equip: screenEquip, tabOrder: screenTabOrder, ring: screenRing, cats: screenCats, catEdit: screenCatEdit, habit: screenHabit, habitEdit: screenHabitEdit, session: screenSession, move: screenMove, exercises: screenExercises, exEdit: screenExEdit, pauses: screenPauses, weights: screenWeights, dups: screenDups, measure: screenMeasure, heuteLook: screenHeuteLook, body: screenBody, wstats: screenWStats, habits: screenHabits, goalEdit: screenGoalEdit, progress: screenProgress, exStats: screenExStats };
 
   // ---------- Sheets ----------
   const INFOS = {

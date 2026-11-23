@@ -574,3 +574,8 @@ input.cb{width:22px;height:22px;accent-color:var(--accent);flex:none;margin:0}
 /* ---------- 2.13.1: Eingabe mit Tastatur ---------- */
 body.kb nav.tabs{display:none}
 body.kb #toast{bottom:24px}
+
+/* ---------- 2.14.0: Mehr als Einstellungsübersicht ---------- */
+.ssub{display:block;color:var(--mu);font-size:var(--f-s);font-weight:500;margin-top:2px;line-height:1.35}
+.ssub.warn{color:var(--warn,#E3B66F)}
+.chips.wrap .chip[aria-pressed=true]{background:var(--accent);color:var(--on-accent)}
