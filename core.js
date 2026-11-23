@@ -233,7 +233,9 @@
     if (!line || day < line.d || a.kg === null) return { ...out, status: 'few' };
     out.soll = sollAt(line, goal, day);
     out.diff = a.kg - out.soll;
-    return { ...out, status: out.diff <= 1e-9 ? 'on' : 'off' };
+    // Auf 0,01 kg genau vergleichen (so genau ist auch der Startpunkt der Linie gespeichert); sonst fiele z. B. der
+    // Starttag selbst durch Rundung knapp „darüber“ (ab 2.13.1)
+    return { ...out, status: Math.round(out.diff * 100) <= 0 ? 'on' : 'off' };
   }
   // Kurs für eine Gewichtsziel-Gewohnheit (Linie wird bei Bedarf aus den Daten bestimmt)
   const goalCourse = (weights, h, day = todayStr()) => course(weights, h && h.goal ? { ...h.goal, line: goalLine(weights, h, day) } : null, day);

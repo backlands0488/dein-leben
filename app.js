@@ -66,7 +66,7 @@
     if (c.status === 'few') return c.line ? `zu wenig Daten (unter ${C.GOAL.minDays} Wiegetagen in 30 Tagen)` : 'zu wenig Daten für die Soll-Linie';
     if (c.status === 'reached') return 'Trend am Ziel';
     if (c.status === 'late') return 'Stichtag vorbei';
-    const tail = c.status === 'on' ? 'auf Kurs' : `${C.fmt(c.diff)} kg darüber`;
+    const tail = c.status === 'on' ? 'auf Kurs' : `${C.fmt(c.diff, c.diff < 0.05 ? 2 : 1)} kg darüber`;
     return `Ø 30 Tage ${C.fmt(c.avg)} · Soll ${C.fmt(c.soll)} kg · ${tail}`;
   }
   const courseCls = c => !c ? '' : c.status === 'on' || c.status === 'reached' ? 'good' : c.status === 'off' || c.status === 'late' ? 'bad' : 'faint';
@@ -1435,7 +1435,7 @@
       <label class="srow" style="cursor:pointer;margin-top:8px"><span class="grow"><b>Soll-Linie im Diagramm</b><span class="faint small" style="display:block">mit 30-Tage-Ø, ab Beginn der Linie</span></span><input type="checkbox" class="sw" ${showSoll() ? 'checked' : ''} data-change="chartSoll" aria-label="Soll-Linie und 30-Tage-Ø im Diagramm zeigen"></label></div>
       <div class="wlist">${row('dups', 'Mögliche Duplikate', `${C.altDuplicates(S.weights, setting('dupKeep', [])).filter(x => !x.kept).length} offen`)}</div>
       <p class="faint small" id="persist" style="margin:18px 0 4px">…</p>
-      <p class="faint small" style="margin:0">Dein Leben 2.13.0</p>`;
+      <p class="faint small" style="margin:0">Dein Leben 2.13.1</p>`;
   }
   const DEFAULTS = { dotShape: 'bar', dotLabel: 'none', heuteView: 'tiles', trainStart: 'ask', weightRange: 'auto', backupDays: 7, weighStale: 3 };
   const iconOf = k => `<span class="sn"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg></span>`;
@@ -2117,14 +2117,42 @@
   // Automatisches Backup beim ersten Tippen (Downloads brauchen eine Nutzeraktion)
   const backupDue = () => S && (!S.lastBackup || C.diffDays(S.lastBackup.slice(0, 10), today()) >= backupDays());
   document.addEventListener('click', e => { if (backupDue() && !e.target.closest('[data-act=backup],[data-act=shareBackup]')) { download(backupName(), backupText()); toast('Automatisches Backup gespeichert (Downloads)'); } }, true);
+  // Wischen erkennen: Nur ein waagerechtes Wischen darf die Seite wechseln. Öffnet sich die Tastatur, schiebt der Browser
+  // die Seitenleiste sonst beim Einblenden des Eingabefelds teils seitlich weg (ab 2.13.1 wieder eingerastet).
+  let tx = null;
+  document.addEventListener('touchstart', e => { ui.touching = true; ui.swipe = false; tx = e.touches[0] ? e.touches[0].clientX : null; }, { passive: true, capture: true });
+  document.addEventListener('touchmove', e => { if (tx !== null && e.touches[0] && Math.abs(e.touches[0].clientX - tx) > 8) ui.swipe = true; }, { passive: true, capture: true });
+  const touchEnd = () => { ui.touching = false; };
+  document.addEventListener('touchend', touchEnd, { passive: true, capture: true });
+  document.addEventListener('touchcancel', touchEnd, { passive: true, capture: true });
+  const typing = () => { const a = document.activeElement; return !!(a && a.closest && a.closest('#pager') && a.matches('input:not([type=checkbox]):not([type=radio]):not([type=file]),textarea,select')); };
+  // Seitenleiste exakt auf die aktuelle Seite setzen (nicht während Wischen oder Sprung per Tab)
+  function realign() {
+    const pg = document.getElementById('pager'); if (!pg || ui.jumping || ui.touching) return;
+    const x = tabOrder().indexOf(ui.tab) * pg.clientWidth;
+    if (Math.abs(pg.scrollLeft - x) > 1) pg.scrollLeft = x;
+  }
   // Aktive Seite aus der Scrollposition ableiten (ohne Neuaufbau)
   document.addEventListener('scroll', e => {
     const pg = e.target; if (!pg || pg.id !== 'pager' || ui.jumping) return;
+    if (typing() && !ui.swipe) { realign(); return; }
     const k = tabOrder()[Math.round(pg.scrollLeft / pg.clientWidth)];
     if (k && k !== ui.tab) { ui.tab = k; syncTabbar(); }
   }, true);
-  document.addEventListener('scrollend', e => { if (e.target && e.target.id === 'pager') { ui.jumping = false; } }, true);
+  document.addEventListener('scrollend', e => {
+    const pg = e.target; if (!pg || pg.id !== 'pager') return;
+    ui.jumping = false;
+    // Unterbrochenes Einrasten (z. B. Tippen ins Feld während des Wischens): auf die nächste ganze Seite setzen
+    if (!ui.touching && Math.abs(pg.scrollLeft / pg.clientWidth - Math.round(pg.scrollLeft / pg.clientWidth)) > 0.002) {
+      const k = tabOrder()[Math.round(pg.scrollLeft / pg.clientWidth)]; if (k) { ui.tab = k; syncTabbar(); }
+      realign();
+    }
+  }, true);
   window.addEventListener('resize', () => { const pg = document.getElementById('pager'); if (pg && !ui.jumping) pg.scrollLeft = tabOrder().indexOf(ui.tab) * pg.clientWidth; });
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', () => { realign(); setTimeout(realign, 350); });
+  // Während der Eingabe die Tab-Leiste ausblenden: mehr Platz über der Tastatur
+  document.addEventListener('focusin', () => { const t = typing(); document.body.classList.toggle('kb', t); if (t) { ui.swipe = false; requestAnimationFrame(realign); setTimeout(realign, 400); } });
+  document.addEventListener('focusout', () => setTimeout(() => { document.body.classList.toggle('kb', typing()); realign(); }, 0));
 
   document.addEventListener('click', e => {
     const el = e.target.closest('[data-act]');

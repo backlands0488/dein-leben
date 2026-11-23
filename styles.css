@@ -570,3 +570,7 @@ input.cb{width:22px;height:22px;accent-color:var(--accent);flex:none;margin:0}
 .ex-acts .grp.end{margin-left:auto}
 .ex-acts .btn.sm{padding:8px 12px}
 .ex-acts .btn.rd{width:36px;min-height:36px;height:36px;padding:0;display:grid;place-items:center;flex:none}
+
+/* ---------- 2.13.1: Eingabe mit Tastatur ---------- */
+body.kb nav.tabs{display:none}
+body.kb #toast{bottom:24px}
